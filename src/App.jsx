@@ -9,9 +9,7 @@ import {
   updateDoc, deleteDoc, query, orderBy, where, onSnapshot,
   arrayUnion, arrayRemove, serverTimestamp, limit
 } from "firebase/firestore";
-import {
-  getStorage, ref, uploadString, getDownloadURL
-} from "firebase/storage";
+// Storage: using Firestore base64 (free, no Firebase Storage needed)
 
 // ─── FIREBASE SETUP ───────────────────────────────────────────────────────────
 const firebaseConfig = {
@@ -27,7 +25,6 @@ const firebaseConfig = {
 const app      = initializeApp(firebaseConfig);
 const auth     = getAuth(app);
 const db       = getFirestore(app);
-const storage  = getStorage(app);
 
 // ─── FIRESTORE HELPERS ────────────────────────────────────────────────────────
 const usersCol  = () => collection(db, "users");
@@ -488,20 +485,23 @@ function EditProfileModal({ currentUser, onClose, onSave }) {
 
   const handleFile = (e) => {
     const file = e.target.files[0]; if (!file) return;
-    if (file.size > 5 * 1024 * 1024) { alert("Image must be under 5MB"); return; }
+    if (file.size > 2 * 1024 * 1024) { alert("Image must be under 2MB"); return; }
     setLoading(true);
     const reader = new FileReader();
-    reader.onload = async (ev) => {
-      try {
-        const storageRef = ref(storage, `avatars/${currentUser.id}`);
-        await uploadString(storageRef, ev.target.result, "data_url");
-        const url = await getDownloadURL(storageRef);
-        setImgUrl(url);
-      } catch {
-        // Firebase storage might need rules — fallback to base64
-        setImgUrl(ev.target.result);
-      }
-      setLoading(false);
+    reader.onload = (ev) => {
+      // Compress image before saving to Firestore
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        const MAX = 200;
+        const ratio = Math.min(MAX / img.width, MAX / img.height);
+        canvas.width  = img.width  * ratio;
+        canvas.height = img.height * ratio;
+        canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+        setImgUrl(canvas.toDataURL("image/jpeg", 0.7));
+        setLoading(false);
+      };
+      img.src = ev.target.result;
     };
     reader.readAsDataURL(file);
   };

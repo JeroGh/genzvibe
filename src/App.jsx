@@ -6,7 +6,7 @@ import {
 } from "firebase/auth";
 import {
   getFirestore, collection, doc, addDoc, getDoc, getDocs, setDoc,
-  updateDoc, deleteDoc, query, orderBy, onSnapshot,
+  updateDoc, deleteDoc, query, orderBy, where, onSnapshot,
   arrayUnion, arrayRemove, serverTimestamp, limit
 } from "firebase/firestore";
 // Storage: using Firestore base64 (free, no Firebase Storage needed)
@@ -547,13 +547,21 @@ function EditProfileModal({ currentUser, onClose, onSave }) {
 }
 
 // ─── POST CARD ────────────────────────────────────────────────────────────────
-function PostCard({ post, currentUser, onNav, toast }) {
-  const [author, setAuthor]         = useState(null);
-  const [comments, setComments]     = useState([]);
+function PostCard({ post: initialPost, currentUser, onNav, toast }) {
+  const [post, setPost]               = useState(initialPost);
+  const [author, setAuthor]           = useState(null);
+  const [comments, setComments]       = useState([]);
   const [commentAuthors, setCAuthors] = useState({});
   const [showComments, setShowComments] = useState(false);
   const [commentText, setCommentText]   = useState("");
   const inputRef = useRef();
+
+  // ── Live listener on this post doc so likes/comments update for everyone ──
+  useEffect(() => {
+    return onSnapshot(doc(db, "posts", initialPost.id), snap => {
+      if (snap.exists()) setPost({ id: snap.id, ...snap.data() });
+    });
+  }, [initialPost.id]);
 
   useEffect(() => { getUser(post.uid).then(setAuthor); }, [post.uid]);
 
@@ -563,7 +571,6 @@ function PostCard({ post, currentUser, onNav, toast }) {
     return onSnapshot(q, async snap => {
       const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       setComments(list);
-      // fetch authors we don't have yet
       const missing = [...new Set(list.map(c => c.uid))].filter(uid => !commentAuthors[uid]);
       if (missing.length) {
         const results = await Promise.all(missing.map(uid => getUser(uid)));
@@ -583,7 +590,7 @@ function PostCard({ post, currentUser, onNav, toast }) {
   const handleLike = async () => {
     const ref2 = doc(db, "posts", post.id);
     if (liked) await updateDoc(ref2, { likes: arrayRemove(currentUser.id) });
-    else        await updateDoc(ref2, { likes: arrayUnion(currentUser.id) });
+    else       await updateDoc(ref2, { likes: arrayUnion(currentUser.id) });
   };
 
   const handleDelete = async () => {

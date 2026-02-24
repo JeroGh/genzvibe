@@ -6,7 +6,7 @@ import {
 } from "firebase/auth";
 import {
   getFirestore, collection, doc, addDoc, getDoc, getDocs, setDoc,
-  updateDoc, deleteDoc, query, orderBy, where, onSnapshot,
+  updateDoc, deleteDoc, query, orderBy, onSnapshot,
   arrayUnion, arrayRemove, serverTimestamp, limit
 } from "firebase/firestore";
 // Storage: using Firestore base64 (free, no Firebase Storage needed)
@@ -685,12 +685,18 @@ function FeedView({ currentUser, onNav, toast }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const ids = [currentUser.id, ...(currentUser.following || [])];
-    // Firestore "in" supports max 30 items; chunk if needed
-    const chunk = ids.slice(0, 30);
-    const q = query(postsCol(), where("uid", "in", chunk), orderBy("ts", "desc"), limit(50));
+    // Fetch recent posts ordered by time only (no composite index needed)
+    // Then filter client-side for followed users + self
+    const q = query(postsCol(), orderBy("ts", "desc"), limit(100));
     return onSnapshot(q, snap => {
-      setPosts(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      const ids = new Set([currentUser.id, ...(currentUser.following || [])]);
+      const filtered = snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .filter(p => ids.has(p.uid));
+      setPosts(filtered);
+      setLoading(false);
+    }, (err) => {
+      console.error("Feed error:", err);
       setLoading(false);
     });
   }, [currentUser.id, JSON.stringify(currentUser.following)]);
@@ -701,7 +707,7 @@ function FeedView({ currentUser, onNav, toast }) {
     <div>
       <Compose currentUser={currentUser} />
       {posts.length === 0
-        ? <div className="empty"><div className="empty-icon">👀</div><div className="empty-title">nothing here yet</div><p>follow people to see their posts</p></div>
+        ? <div className="empty"><div className="empty-icon">👀</div><div className="empty-title">nothing here yet</div><p>follow people or post something 🔥</p></div>
         : posts.map(p => <PostCard key={p.id} post={p} currentUser={currentUser} onNav={onNav} toast={toast} />)
       }
     </div>
@@ -785,8 +791,13 @@ function ProfileView({ uid, currentUser, onNav, toast, onRefresh }) {
 
   useEffect(() => {
     getUser(uid).then(setUser);
-    const q = query(postsCol(), where("uid", "==", uid), orderBy("ts", "desc"));
-    return onSnapshot(q, snap => setPosts(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+    const q = query(postsCol(), orderBy("ts", "desc"), limit(100));
+    return onSnapshot(q, snap => {
+      const filtered = snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .filter(d => d.uid === uid);
+      setPosts(filtered);
+    });
   }, [uid]);
 
   useEffect(() => {

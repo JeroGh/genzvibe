@@ -407,17 +407,31 @@ function Auth() {
         await signInWithEmailAndPassword(auth, form.email, form.password);
       } else {
         if (!form.name.trim() || !form.handle.trim()) throw new Error("Name and handle are required");
-        // Check handle uniqueness
-        const q = query(usersCol(), where("handle", "==", form.handle.trim().toLowerCase()));
-        const snap = await getDocs(q);
-        if (!snap.empty) throw new Error("Handle already taken");
+        // Step 1: Create auth account first
         const cred = await createUserWithEmailAndPassword(auth, form.email, form.password);
-        await createUserDoc(cred.user.uid, {
-          name: form.name.trim(),
-          handle: form.handle.trim().toLowerCase(),
-          bio: form.bio.trim()
-        });
-        await updateProfile(cred.user, { displayName: form.name.trim() });
+        try {
+          // Step 2: Now authenticated — check handle uniqueness
+          const q = query(usersCol(), where("handle", "==", form.handle.trim().toLowerCase()));
+          const snap = await getDocs(q);
+          if (!snap.empty) {
+            // Handle taken — delete the auth account we just made and show error
+            await cred.user.delete();
+            throw new Error("Handle already taken, try another");
+          }
+          // Step 3: Create Firestore user doc
+          await createUserDoc(cred.user.uid, {
+            name: form.name.trim(),
+            handle: form.handle.trim().toLowerCase(),
+            bio: form.bio.trim()
+          });
+          await updateProfile(cred.user, { displayName: form.name.trim() });
+        } catch (innerErr) {
+          // If Firestore write fails, sign out so user isn't stuck logged in with no profile
+          if (innerErr.message !== "Handle already taken, try another") {
+            await signOut(auth);
+          }
+          throw innerErr;
+        }
       }
     } catch (e) {
       const msg = e.code === "auth/email-already-in-use" ? "Email already in use"

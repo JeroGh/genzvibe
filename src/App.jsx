@@ -292,6 +292,32 @@ const CSS = () => (
     /* SECTION LABEL */
     .section-label { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted); margin-bottom: 0.75rem; }
 
+    /* HASHTAG */
+    .hashtag { color: var(--accent2); cursor: pointer; font-weight: 600; transition: color 0.15s; }
+    .hashtag:hover { color: var(--accent); text-decoration: underline; }
+
+    /* TRENDING */
+    .trending-item {
+      display: flex; align-items: center; gap: 1rem;
+      padding: 0.85rem 1.1rem; background: var(--card);
+      border: 1px solid var(--border); border-radius: var(--radius);
+      margin-bottom: 0.6rem; cursor: pointer; transition: border-color 0.15s, transform 0.15s;
+    }
+    .trending-item:hover { border-color: var(--accent2); transform: translateX(3px); }
+    .trending-rank { font-family: var(--font-head); font-size: 1.3rem; font-weight: 800; color: var(--muted); min-width: 24px; text-align: center; }
+    .trending-rank.top { color: var(--accent2); }
+    .trending-tag { font-family: var(--font-head); font-size: 0.95rem; font-weight: 700; color: var(--text); }
+    .trending-count { font-size: 0.73rem; color: var(--sub); margin-top: 0.1rem; }
+
+    /* HASHTAG PAGE */
+    .hashtag-header {
+      background: linear-gradient(135deg, #1a0533, #0f0520);
+      border-radius: var(--radius); padding: 1.25rem 1.5rem;
+      margin-bottom: 1rem; border: 1px solid var(--border);
+    }
+    .hashtag-title { font-family: var(--font-head); font-size: 1.5rem; font-weight: 800; color: var(--accent2); }
+    .hashtag-sub { font-size: 0.82rem; color: var(--sub); margin-top: 0.25rem; }
+
     /* BACK */
     .back { background: none; border: none; cursor: pointer; color: var(--sub); font-family: var(--font-body);
       font-size: 0.82rem; display: flex; align-items: center; gap: 0.4rem; margin-bottom: 1rem; transition: color 0.15s; }
@@ -579,7 +605,7 @@ function EditProfileModal({ currentUser, onClose, onSave }) {
 }
 
 // ─── POST CARD ────────────────────────────────────────────────────────────────
-function PostCard({ post: initialPost, currentUser, onNav, toast }) {
+function PostCard({ post: initialPost, currentUser, onNav, toast, onHashtagClick }) {
   const [post, setPost]               = useState(initialPost);
   const [author, setAuthor]           = useState(null);
   const [repostAuthor, setRepostAuthor] = useState(null); // original author if repost
@@ -695,7 +721,9 @@ function PostCard({ post: initialPost, currentUser, onNav, toast }) {
         </div>
         {isOwn && <button className="btn-icon" onClick={handleDelete} style={{marginLeft:"auto"}}>✕</button>}
       </div>
-      <div className="post-body">{post.text}</div>
+      <div className="post-body">
+        <HighlightedText text={post.text} onHashtagClick={onHashtagClick || (() => {})} />
+      </div>
       <div className="post-actions">
         <button className={`btn-icon ${liked ? "liked" : ""}`} onClick={handleLike}>
           <Icon.Heart filled={liked} /> {post.likes?.length > 0 && post.likes.length}
@@ -738,8 +766,26 @@ function PostCard({ post: initialPost, currentUser, onNav, toast }) {
   );
 }
 
+// ─── HASHTAG UTILS ────────────────────────────────────────────────────────────
+function extractHashtags(text) {
+  return [...new Set((text.match(/#[\w]+/g) || []).map(h => h.toLowerCase()))];
+}
+
+function HighlightedText({ text, onHashtagClick }) {
+  const parts = text.split(/(#[\w]+)/g);
+  return (
+    <span>
+      {parts.map((part, i) =>
+        /^#[\w]+$/.test(part)
+          ? <span key={i} className="hashtag" onClick={e => { e.stopPropagation(); onHashtagClick(part.toLowerCase()); }}>{part}</span>
+          : part
+      )}
+    </span>
+  );
+}
+
 // ─── COMPOSE ─────────────────────────────────────────────────────────────────
-function Compose({ currentUser }) {
+function Compose({ currentUser, onHashtagClick }) {
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(false);
   const MAX = 280;
@@ -747,7 +793,13 @@ function Compose({ currentUser }) {
   const submit = async () => {
     if (!text.trim() || loading) return;
     setLoading(true);
-    await addDoc(postsCol(), { uid: currentUser.id, text: text.trim(), likes: [], commentCount: 0, ts: serverTimestamp() });
+    const hashtags = extractHashtags(text);
+    await addDoc(postsCol(), {
+      uid: currentUser.id, text: text.trim(),
+      likes: [], commentCount: 0, repostedBy: [], repostCount: 0,
+      hashtags,
+      ts: serverTimestamp()
+    });
     setText(""); setLoading(false);
   };
 
@@ -756,11 +808,14 @@ function Compose({ currentUser }) {
       <div className="compose-top">
         <Av user={currentUser} />
         <textarea value={text} onChange={e => setText(e.target.value)} rows={2}
-          placeholder={`what's on your mind? ${VIBES[Math.floor(Math.random() * VIBES.length)]}`}
+          placeholder={`what's on your mind? use #hashtags 🔥`}
           maxLength={MAX} onKeyDown={e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submit(); }} />
       </div>
       <div className="compose-footer">
-        <span className={`char ${text.length > MAX * 0.85 ? "warn" : ""}`}>{MAX - text.length}</span>
+        <span style={{fontSize:"0.75rem",color:"var(--sub)"}}>
+          {extractHashtags(text).length > 0 && <span style={{color:"var(--accent2)"}}>{extractHashtags(text).join(" ")} · </span>}
+          <span className={text.length > MAX * 0.85 ? "char warn" : "char"}>{MAX - text.length}</span>
+        </span>
         <button className="btn btn-primary" onClick={submit} disabled={!text.trim() || loading}>
           <Icon.Plus /> {loading ? "posting..." : "post"}
         </button>
@@ -773,10 +828,9 @@ function Compose({ currentUser }) {
 function FeedView({ currentUser, onNav, toast }) {
   const [posts, setPosts] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [activeTag, setActiveTag] = useState(null);
 
   useEffect(() => {
-    // Fetch recent posts ordered by time only (no composite index needed)
-    // Then filter client-side for followed users + self
     const q = query(postsCol(), orderBy("ts", "desc"), limit(100));
     return onSnapshot(q, snap => {
       const ids = new Set([currentUser.id, ...(currentUser.following || [])]);
@@ -793,12 +847,49 @@ function FeedView({ currentUser, onNav, toast }) {
 
   if (loading) return <div className="empty"><div className="spinner" style={{margin:"3rem auto"}} /></div>;
 
+  if (activeTag) return (
+    <HashtagView tag={activeTag} currentUser={currentUser} onNav={onNav} toast={toast} onBack={() => setActiveTag(null)} />
+  );
+
   return (
     <div>
       <Compose currentUser={currentUser} />
       {posts.length === 0
         ? <div className="empty"><div className="empty-icon">👀</div><div className="empty-title">nothing here yet</div><p>follow people or post something 🔥</p></div>
-        : posts.map(p => <PostCard key={p.id} post={p} currentUser={currentUser} onNav={onNav} toast={toast} />)
+        : posts.map(p => <PostCard key={p.id} post={p} currentUser={currentUser} onNav={onNav} toast={toast} onHashtagClick={setActiveTag} />)
+      }
+    </div>
+  );
+}
+
+// ─── HASHTAG VIEW ─────────────────────────────────────────────────────────────
+function HashtagView({ tag, currentUser, onNav, onBack, toast }) {
+  const [posts, setPosts] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const q = query(postsCol(), orderBy("ts", "desc"), limit(100));
+    return onSnapshot(q, snap => {
+      const filtered = snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .filter(d => d.hashtags?.includes(tag));
+      setPosts(filtered);
+      setLoading(false);
+    });
+  }, [tag]);
+
+  return (
+    <div>
+      <button className="back" onClick={onBack}><Icon.Back /> back</button>
+      <div className="hashtag-header">
+        <div className="hashtag-title">{tag}</div>
+        <div className="hashtag-sub">{loading ? "loading..." : `${posts.length} post${posts.length !== 1 ? "s" : ""}`}</div>
+      </div>
+      {loading
+        ? <div className="empty"><div className="spinner" style={{margin:"2rem auto"}} /></div>
+        : posts.length === 0
+          ? <div className="empty"><div className="empty-icon">🏷️</div><div className="empty-title">no posts yet</div><p>be the first to use {tag}</p></div>
+          : posts.map(p => <PostCard key={p.id} post={p} currentUser={currentUser} onNav={onNav} toast={toast} onHashtagClick={() => {}} />)
       }
     </div>
   );
@@ -806,16 +897,37 @@ function FeedView({ currentUser, onNav, toast }) {
 
 // ─── EXPLORE VIEW ─────────────────────────────────────────────────────────────
 function ExploreView({ currentUser, onNav, toast, onRefresh }) {
+  const [tab, setTab]       = useState("people");
   const [users, setUsers]   = useState([]);
+  const [allPosts, setAllPosts] = useState([]);
   const [q, setQ]           = useState("");
   const [loading, setLoading] = useState(true);
+  const [activeTag, setActiveTag] = useState(null);
 
   useEffect(() => {
     getDocs(usersCol()).then(snap => {
       setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(u => u.id !== currentUser.id));
-      setLoading(false);
     });
   }, [currentUser.id]);
+
+  useEffect(() => {
+    if (tab !== "trending") return;
+    setLoading(true);
+    const q2 = query(postsCol(), orderBy("ts", "desc"), limit(200));
+    return onSnapshot(q2, snap => {
+      setAllPosts(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setLoading(false);
+    });
+  }, [tab]);
+
+  useEffect(() => { if (tab === "people") setLoading(false); }, [tab]);
+
+  // compute trending hashtags from posts
+  const trending = (() => {
+    const counts = {};
+    allPosts.forEach(p => (p.hashtags || []).forEach(h => { counts[h] = (counts[h] || 0) + 1; }));
+    return Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 20);
+  })();
 
   const filtered = q
     ? users.filter(u => u.name?.toLowerCase().includes(q.toLowerCase()) || u.handle?.toLowerCase().includes(q.toLowerCase()))
@@ -836,36 +948,74 @@ function ExploreView({ currentUser, onNav, toast, onRefresh }) {
     onRefresh();
   };
 
-  if (loading) return <div className="empty"><div className="spinner" style={{margin:"3rem auto"}} /></div>;
+  // Show hashtag page
+  if (activeTag) return (
+    <HashtagView tag={activeTag} currentUser={currentUser} onNav={onNav} toast={toast} onBack={() => setActiveTag(null)} />
+  );
 
   return (
     <div>
-      <div className="search-wrap">
-        <Icon.Explore />
-        <input value={q} onChange={e => setQ(e.target.value)} placeholder="search people..." />
+      {/* Tabs */}
+      <div className="tabs" style={{marginBottom:"1rem"}}>
+        <button className={`tab-btn ${tab === "people" ? "active" : ""}`} onClick={() => { setTab("people"); setLoading(false); }}>People</button>
+        <button className={`tab-btn ${tab === "trending" ? "active" : ""}`} onClick={() => setTab("trending")}>🏷️ Trending</button>
       </div>
-      <div className="section-label">People</div>
-      {filtered.length === 0
-        ? <div className="empty"><div className="empty-icon">🔍</div><div className="empty-title">no one found</div></div>
-        : filtered.map(u => {
-          const following = currentUser.following?.includes(u.id);
-          return (
-            <div key={u.id} className="card" style={{marginBottom:"0.6rem"}}>
-              <div className="user-row" style={{padding:0,border:"none"}}>
-                <Av user={u} onClick={() => onNav("profile", u.id)} />
-                <div className="user-info">
-                  <div className="user-name" onClick={() => onNav("profile", u.id)}>{u.name}</div>
-                  <div className="user-handle">@{u.handle}</div>
-                  {u.bio && <div style={{fontSize:"0.78rem",color:"var(--sub)",marginTop:"0.2rem"}}>{u.bio}</div>}
+
+      {/* People tab */}
+      {tab === "people" && (
+        <>
+          <div className="search-wrap">
+            <Icon.Explore />
+            <input value={q} onChange={e => setQ(e.target.value)} placeholder="search people..." />
+          </div>
+          {filtered.length === 0
+            ? <div className="empty"><div className="empty-icon">🔍</div><div className="empty-title">no one found</div></div>
+            : filtered.map(u => {
+              const following = currentUser.following?.includes(u.id);
+              return (
+                <div key={u.id} className="card" style={{marginBottom:"0.6rem"}}>
+                  <div className="user-row" style={{padding:0,border:"none"}}>
+                    <Av user={u} onClick={() => onNav("profile", u.id)} />
+                    <div className="user-info">
+                      <div className="user-name" onClick={() => onNav("profile", u.id)}>{u.name}</div>
+                      <div className="user-handle">@{u.handle}</div>
+                      {u.bio && <div style={{fontSize:"0.78rem",color:"var(--sub)",marginTop:"0.2rem"}}>{u.bio}</div>}
+                    </div>
+                    <button className={`btn ${following ? "btn-following" : "btn-follow"}`} onClick={() => toggle(u.id)}>
+                      {following ? "following" : "+ follow"}
+                    </button>
+                  </div>
                 </div>
-                <button className={`btn ${following ? "btn-following" : "btn-follow"}`} onClick={() => toggle(u.id)}>
-                  {following ? "following" : "+ follow"}
-                </button>
+              );
+            })
+          }
+        </>
+      )}
+
+      {/* Trending tab */}
+      {tab === "trending" && (
+        loading
+          ? <div className="empty"><div className="spinner" style={{margin:"3rem auto"}} /></div>
+          : trending.length === 0
+            ? <div className="empty">
+                <div className="empty-icon">🏷️</div>
+                <div className="empty-title">no hashtags yet</div>
+                <p>use #hashtags in your posts to see them trend</p>
               </div>
-            </div>
-          );
-        })
-      }
+            : <>
+                <div className="section-label">Trending Hashtags</div>
+                {trending.map(([tag, count], i) => (
+                  <div key={tag} className="trending-item" onClick={() => setActiveTag(tag)}>
+                    <div className={`trending-rank ${i < 3 ? "top" : ""}`}>#{i + 1}</div>
+                    <div style={{flex:1}}>
+                      <div className="trending-tag">{tag}</div>
+                      <div className="trending-count">{count} post{count !== 1 ? "s" : ""}</div>
+                    </div>
+                    <div style={{color:"var(--muted)",fontSize:"0.75rem"}}>→</div>
+                  </div>
+                ))}
+              </>
+      )}
     </div>
   );
 }
@@ -878,6 +1028,7 @@ function ProfileView({ uid, currentUser, onNav, toast, onRefresh }) {
   const [editing, setEditing] = useState(false);
   const [followerUsers, setFollowerUsers]   = useState([]);
   const [followingUsers, setFollowingUsers] = useState([]);
+  const [activeTag, setActiveTag] = useState(null);
 
   useEffect(() => {
     getUser(uid).then(setUser);
@@ -958,9 +1109,11 @@ function ProfileView({ uid, currentUser, onNav, toast, onRefresh }) {
       </div>
 
       {tab === "posts" && (
-        posts.length === 0
-          ? <div className="empty"><div className="empty-icon">✨</div><div className="empty-title">no posts yet</div></div>
-          : posts.map(p => <PostCard key={p.id} post={p} currentUser={currentUser} onNav={onNav} toast={toast} />)
+        activeTag
+          ? <HashtagView tag={activeTag} currentUser={currentUser} onNav={onNav} toast={toast} onBack={() => setActiveTag(null)} />
+          : posts.length === 0
+            ? <div className="empty"><div className="empty-icon">✨</div><div className="empty-title">no posts yet</div></div>
+            : posts.map(p => <PostCard key={p.id} post={p} currentUser={currentUser} onNav={onNav} toast={toast} onHashtagClick={setActiveTag} />)
       )}
 
       {(tab === "followers" || tab === "following") && (() => {

@@ -141,7 +141,21 @@ const CSS = () => (
     .btn-icon:hover { background: var(--surface); color: var(--text); }
     .btn-icon.liked { color: var(--red); }
     .btn-icon.commented { color: var(--accent2); }
+    .btn-icon.reposted { color: var(--green); }
     .btn-icon svg { width: 17px; height: 17px; }
+
+    /* REPOST */
+    .repost-label {
+      display: flex; align-items: center; gap: 0.4rem;
+      font-size: 0.72rem; color: var(--sub); margin-bottom: 0.6rem;
+      font-weight: 600;
+    }
+    .repost-label svg { width: 13px; height: 13px; color: var(--green); }
+    .repost-border {
+      border-left: 2px solid var(--border2);
+      padding-left: 0.85rem;
+      margin-bottom: 0.85rem;
+    }
 
     /* POSTS */
     .post { margin-bottom: 0.75rem; animation: fadeUp 0.25s ease both; }
@@ -358,6 +372,9 @@ const Icon = {
     ? <svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
     : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>,
   Comment: () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>,
+  Repost: ({ filled }) => filled
+    ? <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+    : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>,
   Send:    () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>,
   Back:    () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>,
   Plus:    () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>,
@@ -565,20 +582,25 @@ function EditProfileModal({ currentUser, onClose, onSave }) {
 function PostCard({ post: initialPost, currentUser, onNav, toast }) {
   const [post, setPost]               = useState(initialPost);
   const [author, setAuthor]           = useState(null);
+  const [repostAuthor, setRepostAuthor] = useState(null); // original author if repost
   const [comments, setComments]       = useState([]);
   const [commentAuthors, setCAuthors] = useState({});
   const [showComments, setShowComments] = useState(false);
   const [commentText, setCommentText]   = useState("");
   const inputRef = useRef();
 
-  // ── Live listener on this post doc so likes/comments update for everyone ──
+  // ── Live listener on this post doc ──
   useEffect(() => {
     return onSnapshot(doc(db, "posts", initialPost.id), snap => {
       if (snap.exists()) setPost({ id: snap.id, ...snap.data() });
     });
   }, [initialPost.id]);
 
+  // fetch the person who reposted (post.uid) and original author if repost
   useEffect(() => { getUser(post.uid).then(setAuthor); }, [post.uid]);
+  useEffect(() => {
+    if (post.repostOf) getUser(post.originalUid).then(setRepostAuthor);
+  }, [post.repostOf, post.originalUid]);
 
   useEffect(() => {
     if (!showComments) return;
@@ -599,13 +621,43 @@ function PostCard({ post: initialPost, currentUser, onNav, toast }) {
   }, [showComments, post.id]);
 
   if (!author) return null;
-  const liked = currentUser && post.likes?.includes(currentUser.id);
-  const isOwn = currentUser?.id === post.uid;
+  const liked    = currentUser && post.likes?.includes(currentUser.id);
+  const reposted = currentUser && post.repostedBy?.includes(currentUser.id);
+  const isOwn    = currentUser?.id === post.uid;
 
   const handleLike = async () => {
     const ref2 = doc(db, "posts", post.id);
     if (liked) await updateDoc(ref2, { likes: arrayRemove(currentUser.id) });
     else       await updateDoc(ref2, { likes: arrayUnion(currentUser.id) });
+  };
+
+  const handleRepost = async () => {
+    if (reposted) {
+      // undo repost — find and delete the repost doc
+      const q = query(postsCol(), where("repostOf", "==", post.id), where("uid", "==", currentUser.id));
+      const snap = await getDocs(q);
+      snap.forEach(d => deleteDoc(d.ref));
+      await updateDoc(doc(db, "posts", post.id), {
+        repostedBy: arrayRemove(currentUser.id),
+        repostCount: Math.max((post.repostCount || 1) - 1, 0)
+      });
+      toast("Repost removed");
+    } else {
+      // create a new repost doc that references the original
+      await addDoc(postsCol(), {
+        uid: currentUser.id,          // who reposted
+        repostOf: post.id,            // original post id
+        originalUid: post.uid,        // original author id
+        text: post.text,              // copy text for feed rendering
+        likes: [], commentCount: 0, repostedBy: [], repostCount: 0,
+        ts: serverTimestamp()
+      });
+      await updateDoc(doc(db, "posts", post.id), {
+        repostedBy: arrayUnion(currentUser.id),
+        repostCount: (post.repostCount || 0) + 1
+      });
+      toast("Reposted! 🔁");
+    }
   };
 
   const handleDelete = async () => {
@@ -616,18 +668,29 @@ function PostCard({ post: initialPost, currentUser, onNav, toast }) {
   const handleComment = async () => {
     if (!commentText.trim()) return;
     await addDoc(commentsCol(post.id), { uid: currentUser.id, text: commentText.trim(), ts: serverTimestamp() });
-    // increment the count on the post doc so it shows up live for everyone
     await updateDoc(doc(db, "posts", post.id), { commentCount: (post.commentCount || 0) + 1 });
     setCommentText("");
   };
 
+  // who to show as the "header" author
+  const displayAuthor = post.repostOf ? repostAuthor : author;
+  const reposterName  = post.repostOf ? author?.name : null;
+
   return (
     <div className="card post">
+      {/* Reposted-by label */}
+      {post.repostOf && reposterName && (
+        <div className="repost-label">
+          <Icon.Repost filled={false} /> {reposterName} reposted
+        </div>
+      )}
       <div className="post-head">
-        <Av user={author} onClick={() => onNav("profile", author.id)} />
+        <Av user={displayAuthor || author} onClick={() => onNav("profile", (displayAuthor || author).id)} />
         <div className="post-meta">
-          <div className="post-name" onClick={() => onNav("profile", author.id)}>{author.name}</div>
-          <span className="post-handle">@{author.handle}</span>
+          <div className="post-name" onClick={() => onNav("profile", (displayAuthor || author).id)}>
+            {displayAuthor ? displayAuthor.name : author.name}
+          </div>
+          <span className="post-handle">@{displayAuthor ? displayAuthor.handle : author.handle}</span>
           <span className="post-time"> · {ago(post.ts)}</span>
         </div>
         {isOwn && <button className="btn-icon" onClick={handleDelete} style={{marginLeft:"auto"}}>✕</button>}
@@ -639,6 +702,9 @@ function PostCard({ post: initialPost, currentUser, onNav, toast }) {
         </button>
         <button className={`btn-icon ${showComments ? "commented" : ""}`} onClick={() => { setShowComments(s => !s); setTimeout(() => inputRef.current?.focus(), 100); }}>
           <Icon.Comment /> {post.commentCount > 0 && post.commentCount}
+        </button>
+        <button className={`btn-icon ${reposted ? "reposted" : ""}`} onClick={handleRepost}>
+          <Icon.Repost filled={reposted} /> {post.repostCount > 0 && post.repostCount}
         </button>
       </div>
 

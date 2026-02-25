@@ -289,8 +289,33 @@ const CSS = () => (
       background: var(--accent); border: 2px solid var(--card); display: flex; align-items: center; justify-content: center;
       font-size: 0.6rem; color: white; pointer-events: none; }
 
-    /* SECTION LABEL */
-    .section-label { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted); margin-bottom: 0.75rem; }
+    /* FEED TABS */
+    .feed-tabs {
+      display: flex; border-bottom: 1px solid var(--border);
+      margin-bottom: 1rem; position: sticky; top: 56px; z-index: 100;
+      background: rgba(10,10,15,0.95); backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+    }
+    @supports (padding-top: env(safe-area-inset-top)) {
+      .feed-tabs { top: calc(56px + env(safe-area-inset-top)); }
+    }
+    .feed-tab {
+      flex: 1; background: none; border: none; cursor: pointer;
+      color: var(--sub); font-family: var(--font-body); font-size: 0.88rem; font-weight: 600;
+      padding: 0.85rem 0.5rem; border-bottom: 2px solid transparent;
+      transition: all 0.15s; margin-bottom: -1px;
+    }
+    .feed-tab.active { color: var(--text); border-bottom-color: var(--accent2); }
+    .feed-tab:hover { color: var(--text); }
+
+    /* FOR YOU badge on hot posts */
+    .hot-badge {
+      display: inline-flex; align-items: center; gap: 0.25rem;
+      font-size: 0.65rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.08em; color: var(--accent2);
+      background: rgba(168,85,247,0.12); border: 1px solid rgba(168,85,247,0.2);
+      border-radius: 100px; padding: 0.15rem 0.5rem; margin-left: auto;
+    }
 
     /* HASHTAG */
     .hashtag { color: var(--accent2); cursor: pointer; font-weight: 600; transition: color 0.15s; }
@@ -826,24 +851,29 @@ function Compose({ currentUser, onHashtagClick }) {
 
 // ─── FEED VIEW ────────────────────────────────────────────────────────────────
 function FeedView({ currentUser, onNav, toast }) {
-  const [posts, setPosts] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [feedTab, setFeedTab]   = useState("foryou");
+  const [allPosts, setAllPosts] = useState([]);
+  const [loading, setLoading]   = useState(true);
   const [activeTag, setActiveTag] = useState(null);
 
+  // Single listener — fetch all recent posts, filter client-side per tab
   useEffect(() => {
-    const q = query(postsCol(), orderBy("ts", "desc"), limit(100));
+    const q = query(postsCol(), orderBy("ts", "desc"), limit(200));
     return onSnapshot(q, snap => {
-      const ids = new Set([currentUser.id, ...(currentUser.following || [])]);
-      const filtered = snap.docs
-        .map(d => ({ id: d.id, ...d.data() }))
-        .filter(p => ids.has(p.uid));
-      setPosts(filtered);
+      setAllPosts(snap.docs.map(d => ({ id: d.id, ...d.data() })));
       setLoading(false);
-    }, (err) => {
-      console.error("Feed error:", err);
-      setLoading(false);
-    });
-  }, [currentUser.id, JSON.stringify(currentUser.following)]);
+    }, err => { console.error("Feed error:", err); setLoading(false); });
+  }, []);
+
+  // For You: ALL posts sorted by likes desc
+  const forYouPosts = [...allPosts]
+    .sort((a, b) => (b.likes?.length || 0) - (a.likes?.length || 0));
+
+  // Following: only posts from followed users + self, sorted newest first
+  const followingIds = new Set([currentUser.id, ...(currentUser.following || [])]);
+  const followingPosts = allPosts.filter(p => followingIds.has(p.uid));
+
+  const posts = feedTab === "foryou" ? forYouPosts : followingPosts;
 
   if (loading) return <div className="empty"><div className="spinner" style={{margin:"3rem auto"}} /></div>;
 
@@ -854,9 +884,34 @@ function FeedView({ currentUser, onNav, toast }) {
   return (
     <div>
       <Compose currentUser={currentUser} />
+
+      {/* Feed tabs */}
+      <div className="feed-tabs">
+        <button className={`feed-tab ${feedTab === "foryou" ? "active" : ""}`} onClick={() => setFeedTab("foryou")}>
+          ✨ For You
+        </button>
+        <button className={`feed-tab ${feedTab === "following" ? "active" : ""}`} onClick={() => setFeedTab("following")}>
+          👥 Following
+        </button>
+      </div>
+
       {posts.length === 0
-        ? <div className="empty"><div className="empty-icon">👀</div><div className="empty-title">nothing here yet</div><p>follow people or post something 🔥</p></div>
-        : posts.map(p => <PostCard key={p.id} post={p} currentUser={currentUser} onNav={onNav} toast={toast} onHashtagClick={setActiveTag} />)
+        ? <div className="empty">
+            <div className="empty-icon">{feedTab === "foryou" ? "🌍" : "👥"}</div>
+            <div className="empty-title">{feedTab === "foryou" ? "no posts yet" : "nothing here yet"}</div>
+            <p>{feedTab === "foryou" ? "be the first to post something 🔥" : "follow people to see their posts"}</p>
+          </div>
+        : posts.map((p, i) => (
+            <div key={p.id} style={{position:"relative"}}>
+              {/* Hot badge on For You tab for top liked posts */}
+              {feedTab === "foryou" && (p.likes?.length || 0) >= 3 && (
+                <div style={{position:"absolute",top:"0.85rem",right:"1rem",zIndex:10}}>
+                  <span className="hot-badge">🔥 hot</span>
+                </div>
+              )}
+              <PostCard post={p} currentUser={currentUser} onNav={onNav} toast={toast} onHashtagClick={setActiveTag} />
+            </div>
+          ))
       }
     </div>
   );

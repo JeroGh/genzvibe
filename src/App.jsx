@@ -140,6 +140,7 @@ const CSS = () => (
       font-size: 0.82rem; font-family: var(--font-body); padding: 0.35rem 0.6rem; border-radius: var(--radius-sm); transition: all 0.15s; }
     .btn-icon:hover { background: var(--surface); color: var(--text); }
     .btn-icon.liked { color: var(--red); }
+    .btn-icon.commented { color: var(--accent2); }
     .btn-icon svg { width: 17px; height: 17px; }
 
     /* POSTS */
@@ -615,6 +616,8 @@ function PostCard({ post: initialPost, currentUser, onNav, toast }) {
   const handleComment = async () => {
     if (!commentText.trim()) return;
     await addDoc(commentsCol(post.id), { uid: currentUser.id, text: commentText.trim(), ts: serverTimestamp() });
+    // increment the count on the post doc so it shows up live for everyone
+    await updateDoc(doc(db, "posts", post.id), { commentCount: (post.commentCount || 0) + 1 });
     setCommentText("");
   };
 
@@ -634,7 +637,7 @@ function PostCard({ post: initialPost, currentUser, onNav, toast }) {
         <button className={`btn-icon ${liked ? "liked" : ""}`} onClick={handleLike}>
           <Icon.Heart filled={liked} /> {post.likes?.length > 0 && post.likes.length}
         </button>
-        <button className="btn-icon" onClick={() => { setShowComments(s => !s); setTimeout(() => inputRef.current?.focus(), 100); }}>
+        <button className={`btn-icon ${showComments ? "commented" : ""}`} onClick={() => { setShowComments(s => !s); setTimeout(() => inputRef.current?.focus(), 100); }}>
           <Icon.Comment /> {post.commentCount > 0 && post.commentCount}
         </button>
       </div>

@@ -115,7 +115,33 @@ const CSS = () => (
     /* CARDS */
     .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.1rem 1.25rem; transition: border-color 0.2s; }
 
-    /* VIBE CHECK */
+    /* NOTIFICATIONS */
+    .notif-btn { position: relative; background: none; border: none; cursor: pointer; color: var(--sub); display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: 50%; transition: color 0.15s; }
+    .notif-btn:hover { color: var(--text); }
+    .notif-btn svg { width: 20px; height: 20px; }
+    .notif-badge {
+      position: absolute; top: 1px; right: 1px;
+      background: var(--red); color: white;
+      font-size: 0.55rem; font-weight: 700; font-family: var(--font-head);
+      min-width: 16px; height: 16px; border-radius: 100px;
+      display: flex; align-items: center; justify-content: center;
+      padding: 0 3px; border: 2px solid var(--bg);
+      animation: popIn 0.2s ease;
+    }
+    @keyframes popIn { from { transform: scale(0); } to { transform: scale(1); } }
+    .notif-item {
+      display: flex; align-items: flex-start; gap: 0.85rem;
+      padding: 0.9rem 1.1rem; background: var(--card);
+      border: 1px solid var(--border); border-radius: var(--radius);
+      margin-bottom: 0.5rem; transition: border-color 0.15s; cursor: pointer;
+    }
+    .notif-item:hover { border-color: var(--border2); }
+    .notif-item.unread { border-color: rgba(124,58,237,0.3); background: rgba(124,58,237,0.05); }
+    .notif-icon { font-size: 1.1rem; margin-top: 0.1rem; flex-shrink: 0; }
+    .notif-text { flex: 1; font-size: 0.85rem; line-height: 1.5; color: var(--text); }
+    .notif-text b { font-weight: 700; color: var(--text); }
+    .notif-time { font-size: 0.7rem; color: var(--muted); margin-top: 0.2rem; }
+    .notif-preview { font-size: 0.78rem; color: var(--sub); margin-top: 0.2rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
     .vibecheck {
       background: linear-gradient(135deg, #1a0533 0%, #0f0520 60%, #0a1a2e 100%);
       border: 1px solid var(--accent); border-radius: var(--radius);
@@ -482,6 +508,7 @@ const Icon = {
   Send:    () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>,
   Back:    () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>,
   Plus:    () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>,
+  Bell:    () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>,
 };
 
 // ─── AVATAR ───────────────────────────────────────────────────────────────────
@@ -731,13 +758,20 @@ function PostCard({ post: initialPost, currentUser, onNav, toast, onHashtagClick
 
   const handleLike = async () => {
     const ref2 = doc(db, "posts", post.id);
-    if (liked) await updateDoc(ref2, { likes: arrayRemove(currentUser.id) });
-    else       await updateDoc(ref2, { likes: arrayUnion(currentUser.id) });
+    if (liked) {
+      await updateDoc(ref2, { likes: arrayRemove(currentUser.id) });
+    } else {
+      await updateDoc(ref2, { likes: arrayUnion(currentUser.id) });
+      // notify post owner
+      const ownerUid = post.repostOf ? post.originalUid : post.uid;
+      await createNotif(ownerUid, currentUser, "like", {
+        postId: post.id, postPreview: post.text?.slice(0, 60)
+      });
+    }
   };
 
   const handleRepost = async () => {
     if (reposted) {
-      // undo repost — find and delete the repost doc
       const q = query(postsCol(), where("repostOf", "==", post.id), where("uid", "==", currentUser.id));
       const snap = await getDocs(q);
       snap.forEach(d => deleteDoc(d.ref));
@@ -747,18 +781,21 @@ function PostCard({ post: initialPost, currentUser, onNav, toast, onHashtagClick
       });
       toast("Repost removed");
     } else {
-      // create a new repost doc that references the original
       await addDoc(postsCol(), {
-        uid: currentUser.id,          // who reposted
-        repostOf: post.id,            // original post id
-        originalUid: post.uid,        // original author id
-        text: post.text,              // copy text for feed rendering
+        uid: currentUser.id,
+        repostOf: post.id,
+        originalUid: post.uid,
+        text: post.text,
         likes: [], commentCount: 0, repostedBy: [], repostCount: 0,
         ts: serverTimestamp()
       });
       await updateDoc(doc(db, "posts", post.id), {
         repostedBy: arrayUnion(currentUser.id),
         repostCount: (post.repostCount || 0) + 1
+      });
+      // notify post owner
+      await createNotif(post.uid, currentUser, "repost", {
+        postId: post.id, postPreview: post.text?.slice(0, 60)
       });
       toast("Reposted! 🔁");
     }
@@ -773,6 +810,13 @@ function PostCard({ post: initialPost, currentUser, onNav, toast, onHashtagClick
     if (!commentText.trim()) return;
     await addDoc(commentsCol(post.id), { uid: currentUser.id, text: commentText.trim(), ts: serverTimestamp() });
     await updateDoc(doc(db, "posts", post.id), { commentCount: (post.commentCount || 0) + 1 });
+    // notify post owner
+    const ownerUid = post.repostOf ? post.originalUid : post.uid;
+    await createNotif(ownerUid, currentUser, "comment", {
+      postId: post.id,
+      postPreview: post.text?.slice(0, 60),
+      commentText: commentText.trim().slice(0, 60)
+    });
     setCommentText("");
   };
 
@@ -842,6 +886,24 @@ function PostCard({ post: initialPost, currentUser, onNav, toast, onHashtagClick
       )}
     </div>
   );
+}
+
+// ─── NOTIFICATIONS ────────────────────────────────────────────────────────────
+const notifsCol = (uid) => collection(db, "users", uid, "notifications");
+
+async function createNotif(toUid, fromUser, type, extra = {}) {
+  if (toUid === fromUser.id) return; // don't notify yourself
+  await addDoc(notifsCol(toUid), {
+    type,                        // "like" | "comment" | "repost" | "follow"
+    fromId: fromUser.id,
+    fromName: fromUser.name,
+    fromHandle: fromUser.handle,
+    fromImgUrl: fromUser.imgUrl || null,
+    fromAv: fromUser.av || "?",
+    read: false,
+    ts: serverTimestamp(),
+    ...extra
+  });
 }
 
 // ─── POLLS ────────────────────────────────────────────────────────────────────
@@ -1233,6 +1295,7 @@ function ExploreView({ currentUser, onNav, toast, onRefresh }) {
     } else {
       await updateDoc(meRef,   { following: arrayUnion(uid) });
       await updateDoc(themRef, { followers: arrayUnion(currentUser.id) });
+      await createNotif(uid, currentUser, "follow");
       toast("Following! 🔥");
     }
     onRefresh();
@@ -1359,6 +1422,7 @@ function ProfileView({ uid, currentUser, onNav, toast, onRefresh }) {
     } else {
       await updateDoc(meRef,   { following: arrayUnion(uid) });
       await updateDoc(themRef, { followers: arrayUnion(currentUser.id) });
+      await createNotif(uid, currentUser, "follow");
       toast("Following! 🔥");
     }
     onRefresh();
@@ -1445,13 +1509,76 @@ function ProfileView({ uid, currentUser, onNav, toast, onRefresh }) {
   );
 }
 
+// ─── NOTIFICATIONS VIEW ───────────────────────────────────────────────────────
+function NotificationsView({ currentUser, onNav }) {
+  const [notifs, setNotifs] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const q = query(notifsCol(currentUser.id), orderBy("ts", "desc"), limit(50));
+    return onSnapshot(q, snap => {
+      setNotifs(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setLoading(false);
+      // mark all as read
+      snap.docs.filter(d => !d.data().read).forEach(d => updateDoc(d.ref, { read: true }));
+    });
+  }, [currentUser.id]);
+
+  const ICONS = { like: "❤️", comment: "💬", repost: "🔁", follow: "👥" };
+  const MESSAGES = {
+    like:    (n) => <><b>{n.fromName}</b> liked your post</>,
+    comment: (n) => <><b>{n.fromName}</b> commented on your post</>,
+    repost:  (n) => <><b>{n.fromName}</b> reposted your post</>,
+    follow:  (n) => <><b>{n.fromName}</b> started following you</>,
+  };
+
+  if (loading) return <div className="empty"><div className="spinner" style={{margin:"3rem auto"}} /></div>;
+
+  return (
+    <div>
+      <div style={{fontFamily:"var(--font-head)",fontSize:"1.1rem",fontWeight:800,marginBottom:"1.25rem"}}>
+        🔔 Notifications
+      </div>
+      {notifs.length === 0
+        ? <div className="empty">
+            <div className="empty-icon">🔔</div>
+            <div className="empty-title">all quiet here</div>
+            <p>when someone likes, comments or follows you it'll show up here</p>
+          </div>
+        : notifs.map(n => (
+            <div key={n.id} className={`notif-item ${!n.read ? "unread" : ""}`}
+              onClick={() => n.type === "follow" ? onNav("profile", n.fromId) : onNav("feed")}>
+              <div className="notif-icon">{ICONS[n.type] || "🔔"}</div>
+              <div style={{flex:1,minWidth:0}}>
+                <div className="notif-text">{MESSAGES[n.type]?.(n)}</div>
+                {(n.type === "like" || n.type === "comment" || n.type === "repost") && n.postPreview && (
+                  <div className="notif-preview">"{n.postPreview}{n.postPreview?.length >= 60 ? "..." : ""}"</div>
+                )}
+                {n.type === "comment" && n.commentText && (
+                  <div className="notif-preview" style={{color:"var(--accent2)"}}>💬 "{n.commentText}"</div>
+                )}
+                <div className="notif-time">{ago(n.ts)}</div>
+              </div>
+              {/* Mini avatar */}
+              <div className={`av av-sm`}
+                style={{background:`linear-gradient(135deg,${["#7c3aed","#a855f7"][(n.fromName?.charCodeAt(0)||0)%2]},${["#a855f7","#7c3aed"][(n.fromName?.charCodeAt(0)||0)%2]})`,color:"white",flexShrink:0}}>
+                {n.fromImgUrl ? <img src={n.fromImgUrl} alt="" style={{width:"100%",height:"100%",objectFit:"cover",borderRadius:"50%"}} /> : n.fromAv}
+              </div>
+            </div>
+          ))
+      }
+    </div>
+  );
+}
+
 // ─── APP ROOT ─────────────────────────────────────────────────────────────────
 export default function App() {
-  const [authUser, setAuthUser]       = useState(undefined); // undefined = loading
+  const [authUser, setAuthUser]       = useState(undefined);
   const [currentUser, setCurrentUser] = useState(null);
   const [view, setView]               = useState("feed");
   const [profileId, setProfileId]     = useState(null);
   const [toastMsg, setToastMsg]       = useState("");
+  const [unreadCount, setUnreadCount] = useState(0);
 
   const toast = useCallback(msg => { setToastMsg(msg); setTimeout(() => setToastMsg(""), 2500); }, []);
 
@@ -1469,12 +1596,19 @@ export default function App() {
     });
   }, [loadCurrentUser]);
 
-  // Real-time listener for currentUser doc (so follow counts update live)
+  // Real-time listener for currentUser doc
   useEffect(() => {
     if (!authUser) return;
     return onSnapshot(doc(db, "users", authUser.uid), snap => {
       if (snap.exists()) setCurrentUser({ id: snap.id, ...snap.data() });
     });
+  }, [authUser]);
+
+  // Live unread notification count
+  useEffect(() => {
+    if (!authUser) return;
+    const q = query(notifsCol(authUser.uid), where("read", "==", false));
+    return onSnapshot(q, snap => setUnreadCount(snap.size));
   }, [authUser]);
 
   const nav = useCallback((v, id = null) => {
@@ -1484,18 +1618,17 @@ export default function App() {
 
   const handleLogout = async () => { await signOut(auth); setView("feed"); };
 
-  // Loading state
   if (authUser === undefined) {
     return <><CSS /><div className="loading-screen"><div className="spinner" /><div style={{color:"var(--sub)",fontSize:"0.85rem"}}>loading...</div></div></>;
   }
 
-  // Not logged in
   if (!authUser || !currentUser) return <><CSS /><Auth /></>;
 
   const NAV_ITEMS = [
-    { id: "feed",    label: "home",    Icon: Icon.Home },
-    { id: "explore", label: "explore", Icon: Icon.Explore },
-    { id: "profile", label: "me",      Icon: Icon.Profile, action: () => nav("profile", currentUser.id) },
+    { id: "feed",          label: "home",    Icon: Icon.Home },
+    { id: "explore",       label: "explore", Icon: Icon.Explore },
+    { id: "notifications", label: "notifs",  Icon: Icon.Bell },
+    { id: "profile",       label: "me",      Icon: Icon.Profile, action: () => nav("profile", currentUser.id) },
   ];
 
   return (
@@ -1505,6 +1638,13 @@ export default function App() {
       <header className="topbar">
         <div className="logo" onClick={() => nav("feed")}>GenzVibe</div>
         <div className="topbar-right">
+          {/* Bell with unread badge */}
+          <button className="notif-btn" onClick={() => nav("notifications")}>
+            <Icon.Bell />
+            {unreadCount > 0 && (
+              <span className="notif-badge">{unreadCount > 9 ? "9+" : unreadCount}</span>
+            )}
+          </button>
           <Av user={currentUser} onClick={() => nav("profile", currentUser.id)} />
           <button className="btn btn-ghost" style={{borderRadius:"100px",padding:"0.3rem 0.8rem",fontSize:"0.75rem"}} onClick={handleLogout}>
             out
@@ -1538,6 +1678,7 @@ export default function App() {
         <main className="main">
           {view === "feed" && <FeedView currentUser={currentUser} onNav={nav} toast={toast} />}
           {view === "explore" && <ExploreView currentUser={currentUser} onNav={nav} toast={toast} onRefresh={() => loadCurrentUser(authUser.uid)} />}
+          {view === "notifications" && <NotificationsView currentUser={currentUser} onNav={nav} />}
           {view === "profile" && profileId && <ProfileView uid={profileId} currentUser={currentUser} onNav={nav} toast={toast} onRefresh={() => loadCurrentUser(authUser.uid)} />}
         </main>
       </div>

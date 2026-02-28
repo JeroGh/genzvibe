@@ -1638,13 +1638,6 @@ export default function App() {
       <header className="topbar">
         <div className="logo" onClick={() => nav("feed")}>GenzVibe</div>
         <div className="topbar-right">
-          {/* Bell with unread badge */}
-          <button className="notif-btn" onClick={() => nav("notifications")}>
-            <Icon.Bell />
-            {unreadCount > 0 && (
-              <span className="notif-badge">{unreadCount > 9 ? "9+" : unreadCount}</span>
-            )}
-          </button>
           <Av user={currentUser} onClick={() => nav("profile", currentUser.id)} />
           <button className="btn btn-ghost" style={{borderRadius:"100px",padding:"0.3rem 0.8rem",fontSize:"0.75rem"}} onClick={handleLogout}>
             out
@@ -1657,7 +1650,13 @@ export default function App() {
           {NAV_ITEMS.map(n => (
             <button key={n.id} className={`snav-btn ${view === n.id ? "active" : ""}`}
               onClick={n.action || (() => nav(n.id))}>
-              <n.Icon /> <span>{n.label}</span>
+              <div style={{position:"relative",display:"inline-flex"}}>
+                <n.Icon />
+                {n.id === "notifications" && unreadCount > 0 && (
+                  <span className="notif-badge" style={{top:"-4px",right:"-6px"}}>{unreadCount > 9 ? "9+" : unreadCount}</span>
+                )}
+              </div>
+              <span>{n.label}</span>
             </button>
           ))}
           <div className="sidebar-card" style={{marginTop:"1rem",padding:"0.85rem",background:"var(--card)",border:"1px solid var(--border)",borderRadius:"var(--radius)"}}>
@@ -1687,7 +1686,13 @@ export default function App() {
         {NAV_ITEMS.map(n => (
           <button key={n.id} className={`bnav-btn ${view === n.id ? "active" : ""}`}
             onClick={n.action || (() => nav(n.id))}>
-            <n.Icon /> <span>{n.label}</span>
+            <div style={{position:"relative",display:"inline-flex"}}>
+              <n.Icon />
+              {n.id === "notifications" && unreadCount > 0 && (
+                <span className="notif-badge" style={{top:"-4px",right:"-6px"}}>{unreadCount > 9 ? "9+" : unreadCount}</span>
+              )}
+            </div>
+            <span>{n.label}</span>
           </button>
         ))}
       </nav>

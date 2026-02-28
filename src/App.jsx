@@ -115,7 +115,59 @@ const CSS = () => (
     /* CARDS */
     .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.1rem 1.25rem; transition: border-color 0.2s; }
 
-    /* COMPOSE */
+    /* VIBE CHECK */
+    .vibecheck {
+      background: linear-gradient(135deg, #1a0533 0%, #0f0520 60%, #0a1a2e 100%);
+      border: 1px solid var(--accent); border-radius: var(--radius);
+      padding: 1.25rem 1.25rem 1rem; margin-bottom: 1rem;
+      position: relative; overflow: hidden;
+    }
+    .vibecheck::before {
+      content: ''; position: absolute; inset: 0;
+      background: repeating-linear-gradient(45deg, transparent, transparent 20px, rgba(124,58,237,0.03) 20px, rgba(124,58,237,0.03) 21px);
+    }
+    .vibecheck-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.85rem; position: relative; }
+    .vibecheck-label { display: flex; align-items: center; gap: 0.4rem; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--accent2); }
+    .vibecheck-timer { font-size: 0.7rem; color: var(--sub); }
+    .vibecheck-question { font-family: var(--font-head); font-size: 1.05rem; font-weight: 700; color: var(--text); margin-bottom: 1rem; line-height: 1.4; position: relative; }
+    .vibecheck-by { font-size: 0.7rem; color: var(--muted); margin-bottom: 0.85rem; position: relative; }
+
+    .poll-option {
+      position: relative; width: 100%; background: none;
+      border: 1px solid var(--border2); border-radius: var(--radius-sm);
+      padding: 0.65rem 1rem; margin-bottom: 0.5rem; cursor: pointer;
+      text-align: left; font-family: var(--font-body); font-size: 0.88rem;
+      color: var(--text); overflow: hidden; transition: border-color 0.15s;
+    }
+    .poll-option:hover { border-color: var(--accent2); }
+    .poll-option.voted { border-color: var(--accent2); }
+    .poll-option.voted-other { border-color: var(--border); opacity: 0.75; }
+    .poll-bar {
+      position: absolute; left: 0; top: 0; bottom: 0;
+      border-radius: var(--radius-sm); transition: width 0.6s ease;
+      z-index: 0;
+    }
+    .poll-option-text { position: relative; z-index: 1; display: flex; justify-content: space-between; align-items: center; }
+    .poll-pct { font-size: 0.78rem; font-weight: 700; color: var(--accent2); }
+    .poll-votes-total { font-size: 0.72rem; color: var(--sub); margin-top: 0.5rem; text-align: center; position: relative; }
+
+    /* CREATE POLL */
+    .poll-input {
+      width: 100%; background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius-sm); padding: 0.65rem 0.9rem;
+      font-family: var(--font-body); font-size: 0.88rem; color: var(--text);
+      outline: none; transition: border-color 0.15s; margin-bottom: 0.6rem;
+    }
+    .poll-input:focus { border-color: var(--accent); }
+    .poll-input::placeholder { color: var(--muted); }
+    .poll-create-btn {
+      display: flex; align-items: center; gap: 0.5rem;
+      background: none; border: 1px dashed var(--border2); border-radius: var(--radius-sm);
+      padding: 0.55rem 1rem; color: var(--sub); font-family: var(--font-body);
+      font-size: 0.82rem; cursor: pointer; width: 100%; transition: all 0.15s;
+      margin-bottom: 0.5rem;
+    }
+    .poll-create-btn:hover { border-color: var(--accent2); color: var(--accent2); }
     .compose { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 1rem 1.25rem; margin-bottom: 1rem; }
     .compose-top { display: flex; gap: 0.85rem; align-items: flex-start; }
     .compose textarea { flex: 1; background: none; border: none; outline: none; resize: none;
@@ -792,7 +844,182 @@ function PostCard({ post: initialPost, currentUser, onNav, toast, onHashtagClick
   );
 }
 
-// ─── HASHTAG UTILS ────────────────────────────────────────────────────────────
+// ─── POLLS ────────────────────────────────────────────────────────────────────
+const pollsCol = () => collection(db, "polls");
+
+// ─── CREATE POLL MODAL ────────────────────────────────────────────────────────
+function CreatePollModal({ currentUser, onClose, toast }) {
+  const [question, setQuestion] = useState("");
+  const [options, setOptions]   = useState(["", ""]);
+  const [loading, setLoading]   = useState(false);
+
+  const addOption = () => { if (options.length < 4) setOptions(o => [...o, ""]); };
+  const setOpt = (i, v) => setOptions(o => o.map((x, j) => j === i ? v : x));
+  const removeOpt = (i) => { if (options.length > 2) setOptions(o => o.filter((_, j) => j !== i)); };
+
+  const submit = async () => {
+    if (!question.trim()) return;
+    const validOpts = options.map(o => o.trim()).filter(Boolean);
+    if (validOpts.length < 2) return;
+    setLoading(true);
+    await addDoc(pollsCol(), {
+      question: question.trim(),
+      options: validOpts,
+      votes: {},           // { optionIndex: [uid, uid, ...] }
+      createdBy: currentUser.id,
+      creatorName: currentUser.name,
+      creatorHandle: currentUser.handle,
+      ts: serverTimestamp(),
+      active: true,
+    });
+    toast("Vibe Check dropped! 🎯");
+    onClose();
+    setLoading(false);
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal">
+        <div className="modal-title">🎯 Create Vibe Check</div>
+        <button className="modal-close" onClick={onClose}>✕</button>
+
+        <div className="field">
+          <label>your question</label>
+          <input className="poll-input" value={question} onChange={e => setQuestion(e.target.value)}
+            placeholder="ask the community something..." maxLength={120} style={{marginBottom:0}} />
+        </div>
+
+        <div className="field" style={{marginTop:"1rem"}}>
+          <label>options ({options.length}/4)</label>
+          {options.map((opt, i) => (
+            <div key={i} style={{display:"flex",gap:"0.5rem",marginBottom:"0.5rem"}}>
+              <input className="poll-input" value={opt} onChange={e => setOpt(i, e.target.value)}
+                placeholder={`option ${i + 1}`} maxLength={60} style={{marginBottom:0,flex:1}} />
+              {options.length > 2 && (
+                <button onClick={() => removeOpt(i)} style={{background:"none",border:"none",color:"var(--sub)",cursor:"pointer",fontSize:"1rem",padding:"0 0.25rem"}}>✕</button>
+              )}
+            </div>
+          ))}
+          {options.length < 4 && (
+            <button className="poll-create-btn" onClick={addOption}>+ add option</button>
+          )}
+        </div>
+
+        <div style={{display:"flex",gap:"0.75rem",marginTop:"1rem"}}>
+          <button className="btn btn-ghost" style={{flex:1,padding:"0.65rem"}} onClick={onClose}>cancel</button>
+          <button className="btn btn-primary" style={{flex:2,padding:"0.65rem",borderRadius:"var(--radius-sm)"}}
+            onClick={submit} disabled={loading || !question.trim() || options.filter(o=>o.trim()).length < 2}>
+            {loading ? "dropping..." : "drop it 🎯"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── VIBE CHECK CARD ──────────────────────────────────────────────────────────
+function VibeCheckCard({ poll, currentUser, toast }) {
+  const totalVotes = Object.values(poll.votes || {}).reduce((s, arr) => s + (arr?.length || 0), 0);
+  const userVote   = Object.entries(poll.votes || {}).findIndex(([, arr]) => arr?.includes(currentUser.id));
+  const hasVoted   = userVote !== -1;
+
+  const vote = async (i) => {
+    if (hasVoted) return;
+    const pollRef = doc(db, "polls", poll.id);
+    const key = `votes.${i}`;
+    await updateDoc(pollRef, { [key]: arrayUnion(currentUser.id) });
+  };
+
+  const getVotes = (i) => poll.votes?.[i]?.length || 0;
+  const getPct   = (i) => totalVotes === 0 ? 0 : Math.round((getVotes(i) / totalVotes) * 100);
+
+  // Time ago
+  const timeStr = ago(poll.ts);
+
+  const OPTION_COLORS = [
+    "rgba(124,58,237,0.25)", "rgba(168,85,247,0.2)",
+    "rgba(34,197,94,0.18)", "rgba(251,191,36,0.18)"
+  ];
+
+  return (
+    <div className="vibecheck">
+      <div className="vibecheck-header">
+        <div className="vibecheck-label">🎯 Vibe Check</div>
+        <div className="vibecheck-timer">{timeStr}</div>
+      </div>
+      <div className="vibecheck-question">{poll.question}</div>
+      <div className="vibecheck-by">by @{poll.creatorHandle}</div>
+
+      {poll.options.map((opt, i) => {
+        const pct     = getPct(i);
+        const myVote  = userVote === i;
+        const barColor = OPTION_COLORS[i % OPTION_COLORS.length];
+        return (
+          <button key={i}
+            className={`poll-option ${hasVoted ? (myVote ? "voted" : "voted-other") : ""}`}
+            onClick={() => vote(i)} disabled={hasVoted}>
+            {hasVoted && <div className="poll-bar" style={{width:`${pct}%`, background: barColor}} />}
+            <div className="poll-option-text">
+              <span>{myVote && "✓ "}{opt}</span>
+              {hasVoted && <span className="poll-pct">{pct}%</span>}
+            </div>
+          </button>
+        );
+      })}
+
+      <div className="poll-votes-total">
+        {hasVoted ? `${totalVotes} vote${totalVotes !== 1 ? "s" : ""} total` : "tap to vote"}
+      </div>
+    </div>
+  );
+}
+
+// ─── VIBE CHECK STRIP (shows latest polls in feed) ────────────────────────────
+function VibeCheckStrip({ currentUser, toast, onOpenCreate }) {
+  const [polls, setPolls]   = useState([]);
+  const [idx, setIdx]       = useState(0);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const q = query(pollsCol(), orderBy("ts", "desc"), limit(10));
+    return onSnapshot(q, snap => {
+      setPolls(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setLoading(false);
+    });
+  }, []);
+
+  if (loading) return null;
+
+  return (
+    <div style={{marginBottom:"0.5rem"}}>
+      {/* Current poll */}
+      {polls.length > 0
+        ? <VibeCheckCard poll={polls[idx]} currentUser={currentUser} toast={toast} />
+        : <div className="vibecheck" style={{textAlign:"center",padding:"1.5rem"}}>
+            <div style={{fontSize:"1.5rem",marginBottom:"0.5rem"}}>🎯</div>
+            <div style={{fontFamily:"var(--font-head)",fontWeight:700,marginBottom:"0.35rem"}}>No Vibe Checks yet</div>
+            <div style={{fontSize:"0.82rem",color:"var(--sub)"}}>be the first to drop one</div>
+          </div>
+      }
+
+      {/* Navigation + create button */}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"0.85rem",padding:"0 0.25rem"}}>
+        <div style={{display:"flex",gap:"0.4rem"}}>
+          {polls.length > 1 && polls.map((_, i) => (
+            <button key={i} onClick={() => setIdx(i)}
+              style={{width: i === idx ? "18px" : "6px", height:"6px", borderRadius:"100px",
+                background: i === idx ? "var(--accent2)" : "var(--muted)",
+                border:"none", cursor:"pointer", transition:"all 0.2s", padding:0}} />
+          ))}
+        </div>
+        <button className="btn btn-ghost" style={{fontSize:"0.75rem",padding:"0.3rem 0.85rem",display:"flex",alignItems:"center",gap:"0.35rem"}}
+          onClick={onOpenCreate}>
+          🎯 create poll
+        </button>
+      </div>
+    </div>
+  );
+}
 function extractHashtags(text) {
   return [...new Set((text.match(/#[\w]+/g) || []).map(h => h.toLowerCase()))];
 }
@@ -856,6 +1083,7 @@ function FeedView({ currentUser, onNav, toast }) {
   const [allPosts, setAllPosts] = useState([]);
   const [loading, setLoading]   = useState(true);
   const [activeTag, setActiveTag] = useState(null);
+  const [showCreatePoll, setShowCreatePoll] = useState(false);
 
   // Single listener — fetch all recent posts, filter client-side per tab
   useEffect(() => {
@@ -884,6 +1112,8 @@ function FeedView({ currentUser, onNav, toast }) {
 
   return (
     <div>
+      {showCreatePoll && <CreatePollModal currentUser={currentUser} onClose={() => setShowCreatePoll(false)} toast={toast} />}
+
       <Compose currentUser={currentUser} />
 
       {/* Feed tabs */}
@@ -896,6 +1126,11 @@ function FeedView({ currentUser, onNav, toast }) {
         </button>
       </div>
 
+      {/* Vibe Check strip — only on For You tab */}
+      {feedTab === "foryou" && (
+        <VibeCheckStrip currentUser={currentUser} toast={toast} onOpenCreate={() => setShowCreatePoll(true)} />
+      )}
+
       {posts.length === 0
         ? <div className="empty">
             <div className="empty-icon">{feedTab === "foryou" ? "🌍" : "👥"}</div>
@@ -904,7 +1139,6 @@ function FeedView({ currentUser, onNav, toast }) {
           </div>
         : posts.map((p, i) => (
             <div key={p.id} style={{position:"relative"}}>
-              {/* Hot badge on For You tab for top liked posts */}
               {feedTab === "foryou" && (p.likes?.length || 0) >= 3 && (
                 <div style={{position:"absolute",top:"0.85rem",right:"1rem",zIndex:10}}>
                   <span className="hot-badge">🔥 hot</span>

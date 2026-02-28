@@ -119,7 +119,8 @@ const CSS = () => (
     .compose { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 1rem 1.25rem; margin-bottom: 1rem; }
     .compose-top { display: flex; gap: 0.85rem; align-items: flex-start; }
     .compose textarea { flex: 1; background: none; border: none; outline: none; resize: none;
-      color: var(--text); font-family: var(--font-body); font-size: 0.95rem; line-height: 1.6; min-height: 64px; padding-top: 0.2rem; }
+      color: var(--text); font-family: var(--font-body); font-size: 0.95rem; line-height: 1.6;
+      min-height: 64px; padding-top: 0.2rem; white-space: pre-wrap; overflow-y: hidden; }
     .compose textarea::placeholder { color: var(--muted); }
     .compose-footer { display: flex; align-items: center; justify-content: space-between; margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border); }
     .char { font-size: 0.75rem; color: var(--sub); }
@@ -166,7 +167,7 @@ const CSS = () => (
     .post-name:hover { color: var(--accent2); }
     .post-handle { font-size: 0.75rem; color: var(--sub); }
     .post-time { font-size: 0.72rem; color: var(--muted); }
-    .post-body { font-size: 0.92rem; line-height: 1.65; margin-bottom: 0.85rem; color: var(--text); word-break: break-word; }
+    .post-body { font-size: 0.92rem; line-height: 1.65; margin-bottom: 0.85rem; color: var(--text); word-break: break-word; white-space: pre-wrap; }
     .post-actions { display: flex; gap: 0.25rem; margin: -0.35rem; }
 
     /* COMMENTS */
@@ -832,7 +833,7 @@ function Compose({ currentUser, onHashtagClick }) {
     <div className="compose">
       <div className="compose-top">
         <Av user={currentUser} />
-        <textarea value={text} onChange={e => setText(e.target.value)} rows={2}
+        <textarea value={text} onChange={e => { setText(e.target.value); e.target.style.height = "auto"; e.target.style.height = e.target.scrollHeight + "px"; }} rows={2}
           placeholder={`what's on your mind? use #hashtags 🔥`}
           maxLength={MAX} onKeyDown={e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submit(); }} />
       </div>

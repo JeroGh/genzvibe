@@ -814,7 +814,7 @@ function HighlightedText({ text, onHashtagClick }) {
 function Compose({ currentUser, onHashtagClick }) {
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(false);
-  const MAX = 280;
+  const MAX = 500;
 
   const submit = async () => {
     if (!text.trim() || loading) return;

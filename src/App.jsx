@@ -7,7 +7,7 @@ import {
 import {
   getFirestore, collection, doc, addDoc, getDoc, getDocs, setDoc,
   updateDoc, deleteDoc, query, orderBy, where, onSnapshot,
-  arrayUnion, arrayRemove, serverTimestamp, limit
+  arrayUnion, arrayRemove, serverTimestamp, limit, increment
 } from "firebase/firestore";
 // Storage: using Firestore base64 (free, no Firebase Storage needed)
 
@@ -742,9 +742,11 @@ function CommentItem({ comment, author, replies, commentAuthors, currentUser, po
     const newReply = {
       uid: currentUser.id,
       text: replyText.trim(),
-      ts: Date.now(), // client timestamp for instant render
+      ts: Date.now(),
     };
+    // save reply + increment post comment count (counts as a comment like Instagram)
     await updateDoc(commentRef, { replies: arrayUnion(newReply) });
+    await updateDoc(doc(db, "posts", postId), { commentCount: increment(1) });
     // notify comment author
     if (comment.uid !== currentUser.id) {
       await createNotif(comment.uid, currentUser, "reply", {
@@ -923,7 +925,7 @@ function PostCard({ post: initialPost, currentUser, onNav, toast, onHashtagClick
   const handleComment = async () => {
     if (!commentText.trim()) return;
     await addDoc(commentsCol(post.id), { uid: currentUser.id, text: commentText.trim(), ts: serverTimestamp() });
-    await updateDoc(doc(db, "posts", post.id), { commentCount: (post.commentCount || 0) + 1 });
+    await updateDoc(doc(db, "posts", post.id), { commentCount: increment(1) });
     // notify post owner
     const ownerUid = post.repostOf ? post.originalUid : post.uid;
     await createNotif(ownerUid, currentUser, "comment", {

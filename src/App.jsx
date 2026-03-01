@@ -261,6 +261,19 @@ const CSS = () => (
     .comment-input input:focus { border-color: var(--accent); }
     .comment-input input::placeholder { color: var(--muted); }
 
+    /* REPLIES */
+    .reply-btn { background: none; border: none; cursor: pointer; font-size: 0.72rem;
+      color: var(--muted); font-family: var(--font-body); padding: 0.2rem 0;
+      transition: color 0.15s; margin-top: 0.2rem; }
+    .reply-btn:hover { color: var(--accent2); }
+    .replies { margin-top: 0.5rem; padding-left: 0.85rem; border-left: 2px solid var(--border); display: flex; flex-direction: column; gap: 0.5rem; }
+    .reply-input-wrap { display: flex; gap: 0.5rem; align-items: center; margin-top: 0.4rem; padding-left: 0.85rem; border-left: 2px solid var(--accent); }
+    .reply-input-wrap input { flex: 1; background: var(--surface); border: 1px solid var(--border);
+      border-radius: 100px; padding: 0.4rem 0.85rem; font-family: var(--font-body);
+      font-size: 0.8rem; color: var(--text); outline: none; transition: border-color 0.15s; }
+    .reply-input-wrap input:focus { border-color: var(--accent); }
+    .reply-tag { color: var(--accent2); font-weight: 600; font-size: 0.82rem; }
+
     /* AVATAR */
     .av { border-radius: 50%; display: flex; align-items: center; justify-content: center;
       font-family: var(--font-head); font-weight: 700; flex-shrink: 0; cursor: pointer; transition: transform 0.15s; overflow: hidden; }
@@ -709,6 +722,107 @@ function EditProfileModal({ currentUser, onClose, onSave }) {
   );
 }
 
+// ─── COMMENT ITEM (with replies) ──────────────────────────────────────────────
+function CommentItem({ comment, author, replies, commentAuthors, currentUser, postId, onNav, onReplyAuthorsNeeded }) {
+  const [showReplyInput, setShowReplyInput] = useState(false);
+  const [replyText, setReplyText]           = useState("");
+  const [showReplies, setShowReplies]       = useState(false);
+  const replyRef = useRef();
+
+  // Fetch authors of replies we don't have yet
+  useEffect(() => {
+    if (replies.length) {
+      onReplyAuthorsNeeded(replies.map(r => r.uid));
+    }
+  }, [replies.length]);
+
+  const submitReply = async () => {
+    if (!replyText.trim()) return;
+    const commentRef = doc(db, "posts", postId, "comments", comment.id);
+    const newReply = {
+      uid: currentUser.id,
+      text: replyText.trim(),
+      ts: Date.now(), // client timestamp for instant render
+    };
+    await updateDoc(commentRef, { replies: arrayUnion(newReply) });
+    // notify comment author
+    if (comment.uid !== currentUser.id) {
+      await createNotif(comment.uid, currentUser, "reply", {
+        postId, commentText: replyText.trim().slice(0, 60)
+      });
+    }
+    setReplyText("");
+    setShowReplyInput(false);
+    setShowReplies(true);
+  };
+
+  return (
+    <div className="comment">
+      <Av user={author} size="av-sm" onClick={() => onNav("profile", author.id)} />
+      <div className="comment-body" style={{flex:1}}>
+        <div className="comment-author" onClick={() => onNav("profile", author.id)}>
+          {author.name} <span style={{color:"var(--muted)",fontWeight:400}}>· {ago(comment.ts)}</span>
+        </div>
+        <div className="comment-text">{comment.text}</div>
+
+        {/* Reply button */}
+        <button className="reply-btn" onClick={() => {
+          setShowReplyInput(s => !s);
+          setTimeout(() => replyRef.current?.focus(), 80);
+        }}>
+          {showReplyInput ? "cancel" : `↩ reply${replies.length > 0 ? ` · ${replies.length}` : ""}`}
+        </button>
+
+        {/* Show/hide existing replies */}
+        {replies.length > 0 && !showReplyInput && (
+          <button className="reply-btn" style={{marginLeft:"0.75rem"}} onClick={() => setShowReplies(s => !s)}>
+            {showReplies ? "hide replies" : `▾ ${replies.length} repl${replies.length === 1 ? "y" : "ies"}`}
+          </button>
+        )}
+
+        {/* Existing replies */}
+        {showReplies && replies.length > 0 && (
+          <div className="replies">
+            {replies.map((r, i) => {
+              const ru = commentAuthors[r.uid];
+              return (
+                <div key={i} className="comment">
+                  {ru
+                    ? <Av user={ru} size="av-sm" onClick={() => onNav("profile", ru.id)} />
+                    : <div className="av av-sm" style={{background:"var(--muted)"}} />
+                  }
+                  <div className="comment-body">
+                    <div className="comment-author" onClick={() => ru && onNav("profile", ru.id)}>
+                      {ru?.name || "..."} <span style={{color:"var(--muted)",fontWeight:400}}>· {ago({toMillis: () => r.ts})}</span>
+                    </div>
+                    <div className="comment-text">{r.text}</div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Reply input */}
+        {showReplyInput && (
+          <div className="reply-input-wrap">
+            <input
+              ref={replyRef}
+              value={replyText}
+              onChange={e => setReplyText(e.target.value)}
+              placeholder={`reply to ${author.name}...`}
+              onKeyDown={e => e.key === "Enter" && submitReply()}
+            />
+            <button className="btn btn-primary" style={{padding:"0.35rem 0.65rem",flexShrink:0}} onClick={submitReply} disabled={!replyText.trim()}>
+              <Icon.Send />
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── POST CARD ────────────────────────────────────────────────────────────────
 function PostCard({ post: initialPost, currentUser, onNav, toast, onHashtagClick }) {
   const [post, setPost]               = useState(initialPost);
@@ -862,16 +976,30 @@ function PostCard({ post: initialPost, currentUser, onNav, toast, onHashtagClick
         <div className="comments">
           {comments.map(c => {
             const cu = commentAuthors[c.uid]; if (!cu) return null;
+            const replies = c.replies || [];
             return (
-              <div key={c.id} className="comment">
-                <Av user={cu} size="av-sm" onClick={() => onNav("profile", cu.id)} />
-                <div className="comment-body">
-                  <div className="comment-author" onClick={() => onNav("profile", cu.id)}>
-                    {cu.name} <span style={{color:"var(--muted)",fontWeight:400}}>· {ago(c.ts)}</span>
-                  </div>
-                  <div className="comment-text">{c.text}</div>
-                </div>
-              </div>
+              <CommentItem
+                key={c.id}
+                comment={c}
+                author={cu}
+                replies={replies}
+                commentAuthors={commentAuthors}
+                currentUser={currentUser}
+                postId={post.id}
+                onNav={onNav}
+                onReplyAuthorsNeeded={(uids) => {
+                  const missing = uids.filter(uid => !commentAuthors[uid]);
+                  if (missing.length) {
+                    Promise.all(missing.map(uid => getUser(uid))).then(results => {
+                      setCAuthors(prev => {
+                        const next = { ...prev };
+                        results.forEach((u, i) => { if (u) next[missing[i]] = u; });
+                        return next;
+                      });
+                    });
+                  }
+                }}
+              />
             );
           })}
           <div className="comment-input">
@@ -1524,12 +1652,13 @@ function NotificationsView({ currentUser, onNav }) {
     });
   }, [currentUser.id]);
 
-  const ICONS = { like: "❤️", comment: "💬", repost: "🔁", follow: "👥" };
+  const ICONS = { like: "❤️", comment: "💬", repost: "🔁", follow: "👥", reply: "↩️" };
   const MESSAGES = {
     like:    (n) => <><b>{n.fromName}</b> liked your post</>,
     comment: (n) => <><b>{n.fromName}</b> commented on your post</>,
     repost:  (n) => <><b>{n.fromName}</b> reposted your post</>,
     follow:  (n) => <><b>{n.fromName}</b> started following you</>,
+    reply:   (n) => <><b>{n.fromName}</b> replied to your comment</>,
   };
 
   if (loading) return <div className="empty"><div className="spinner" style={{margin:"3rem auto"}} /></div>;

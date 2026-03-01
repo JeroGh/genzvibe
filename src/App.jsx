@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { initializeApp } from "firebase/app";
 import {
   getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword,
-  signOut, onAuthStateChanged, updateProfile
+  signOut, onAuthStateChanged, updateProfile, browserLocalPersistence, setPersistence
 } from "firebase/auth";
 import {
   getFirestore, collection, doc, addDoc, getDoc, getDocs, setDoc,
@@ -25,6 +25,9 @@ const firebaseConfig = {
 const app      = initializeApp(firebaseConfig);
 const auth     = getAuth(app);
 const db       = getFirestore(app);
+
+// Persist session across page refreshes
+setPersistence(auth, browserLocalPersistence).catch(console.error);
 
 // ─── FIRESTORE HELPERS ────────────────────────────────────────────────────────
 const usersCol  = () => collection(db, "users");

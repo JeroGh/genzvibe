@@ -1391,7 +1391,11 @@ function ExploreView({ currentUser, onNav, toast, onRefresh }) {
 
   useEffect(() => {
     getDocs(usersCol()).then(snap => {
-      setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(u => u.id !== currentUser.id));
+      const list = snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .filter(u => u.id !== currentUser.id)
+        .sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
+      setUsers(list);
     });
   }, [currentUser.id]);
 
@@ -1463,7 +1467,12 @@ function ExploreView({ currentUser, onNav, toast, onRefresh }) {
                   <div className="user-row" style={{padding:0,border:"none"}}>
                     <Av user={u} onClick={() => onNav("profile", u.id)} />
                     <div className="user-info">
-                      <div className="user-name" onClick={() => onNav("profile", u.id)}>{u.name}</div>
+                      <div className="user-name" onClick={() => onNav("profile", u.id)}>
+                        {u.name}
+                        {u.createdAt && (Date.now() - u.createdAt.toMillis()) < 86400000 && (
+                          <span style={{marginLeft:"0.4rem",fontSize:"0.62rem",fontWeight:700,background:"var(--accent)",color:"white",borderRadius:"100px",padding:"0.1rem 0.45rem",verticalAlign:"middle"}}>NEW</span>
+                        )}
+                      </div>
                       <div className="user-handle">@{u.handle}</div>
                       {u.bio && <div style={{fontSize:"0.78rem",color:"var(--sub)",marginTop:"0.2rem"}}>{u.bio}</div>}
                     </div>

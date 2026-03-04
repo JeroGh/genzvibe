@@ -730,77 +730,100 @@ function CommentItem({ comment, author, replies, commentAuthors, currentUser, po
   const [showReplyInput, setShowReplyInput] = useState(false);
   const [replyText, setReplyText]           = useState("");
   const [showReplies, setShowReplies]       = useState(false);
+  const [localReplies, setLocalReplies]     = useState([]); // optimistic replies
   const replyRef = useRef();
 
-  // Fetch authors of replies we don't have yet
+  // merge Firestore replies with local optimistic ones
+  const allReplies = [
+    ...replies,
+    ...localReplies.filter(lr => !replies.some(r => r.uid === lr.uid && r.text === lr.text))
+  ];
+
   useEffect(() => {
-    if (replies.length) {
-      onReplyAuthorsNeeded(replies.map(r => r.uid));
-    }
+    if (replies.length) onReplyAuthorsNeeded(replies.map(r => r.uid));
   }, [replies.length]);
 
   const submitReply = async () => {
     if (!replyText.trim()) return;
-    const commentRef = doc(db, "posts", postId, "comments", comment.id);
-    const newReply = {
-      uid: currentUser.id,
-      text: replyText.trim(),
-      ts: Date.now(),
-    };
-    // save reply + increment post comment count (counts as a comment like Instagram)
-    await updateDoc(commentRef, { replies: arrayUnion(newReply) });
-    await updateDoc(doc(db, "posts", postId), { commentCount: increment(1) });
-    // notify comment author
-    if (comment.uid !== currentUser.id) {
-      await createNotif(comment.uid, currentUser, "reply", {
-        postId, commentText: replyText.trim().slice(0, 60)
-      });
+    const text = replyText.trim();
+    const tempReply = { uid: currentUser.id, text, ts: Date.now(), _optimistic: true };
+    setLocalReplies(prev => [...prev, tempReply]);
+    setReplyText(""); setShowReplyInput(false); setShowReplies(true);
+    try {
+      const commentRef = doc(db, "posts", postId, "comments", comment.id);
+      await updateDoc(commentRef, { replies: arrayUnion({ uid: currentUser.id, text, ts: Date.now() }) });
+      await updateDoc(doc(db, "posts", postId), { commentCount: increment(1) });
+      if (comment.uid !== currentUser.id) {
+        await createNotif(comment.uid, currentUser, "reply", { postId, commentText: text.slice(0, 60) });
+      }
+    } catch (e) {
+      setLocalReplies(prev => prev.filter(r => r !== tempReply));
+      setReplyText(text);
     }
-    setReplyText("");
-    setShowReplyInput(false);
-    setShowReplies(true);
   };
+
+  const deleteComment = async () => {
+    await deleteDoc(doc(db, "posts", postId, "comments", comment.id));
+    await updateDoc(doc(db, "posts", postId), { commentCount: increment(-1) });
+  };
+
+  const deleteReply = async (reply) => {
+    const commentRef = doc(db, "posts", postId, "comments", comment.id);
+    await updateDoc(commentRef, { replies: arrayRemove(reply) });
+    await updateDoc(doc(db, "posts", postId), { commentCount: increment(-1) });
+  };
+
+  const isOwnComment = comment.uid === currentUser.id;
 
   return (
     <div className="comment">
       <Av user={author} size="av-sm" onClick={() => onNav("profile", author.id)} />
       <div className="comment-body" style={{flex:1}}>
-        <div className="comment-author" onClick={() => onNav("profile", author.id)}>
-          {author.name} <span style={{color:"var(--muted)",fontWeight:400}}>· {ago(comment.ts)}</span>
+        <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between"}}>
+          <div className="comment-author" onClick={() => onNav("profile", author.id)}>
+            {author.name} <span style={{color:"var(--muted)",fontWeight:400}}>· {ago(comment.ts)}</span>
+          </div>
+          {isOwnComment && (
+            <button onClick={deleteComment} style={{background:"none",border:"none",cursor:"pointer",color:"var(--muted)",fontSize:"0.72rem",padding:"0 0 0 0.5rem",lineHeight:1,transition:"color 0.15s"}}
+              onMouseOver={e=>e.target.style.color="var(--red)"} onMouseOut={e=>e.target.style.color="var(--muted)"}>
+              ✕
+            </button>
+          )}
         </div>
         <div className="comment-text">{comment.text}</div>
 
-        {/* Reply button */}
-        <button className="reply-btn" onClick={() => {
-          setShowReplyInput(s => !s);
-          setTimeout(() => replyRef.current?.focus(), 80);
-        }}>
-          {showReplyInput ? "cancel" : `↩ reply${replies.length > 0 ? ` · ${replies.length}` : ""}`}
+        {/* Reply + show replies buttons */}
+        <button className="reply-btn" onClick={() => { setShowReplyInput(s => !s); setTimeout(() => replyRef.current?.focus(), 80); }}>
+          {showReplyInput ? "cancel" : `↩ reply${allReplies.length > 0 ? ` · ${allReplies.length}` : ""}`}
         </button>
-
-        {/* Show/hide existing replies */}
-        {replies.length > 0 && !showReplyInput && (
+        {allReplies.length > 0 && !showReplyInput && (
           <button className="reply-btn" style={{marginLeft:"0.75rem"}} onClick={() => setShowReplies(s => !s)}>
-            {showReplies ? "hide replies" : `▾ ${replies.length} repl${replies.length === 1 ? "y" : "ies"}`}
+            {showReplies ? "hide replies" : `▾ ${allReplies.length} repl${allReplies.length === 1 ? "y" : "ies"}`}
           </button>
         )}
 
         {/* Existing replies */}
-        {showReplies && replies.length > 0 && (
+        {showReplies && allReplies.length > 0 && (
           <div className="replies">
-            {replies.map((r, i) => {
-              const ru = commentAuthors[r.uid];
+            {allReplies.map((r, i) => {
+              const ru = commentAuthors[r.uid] || (r.uid === currentUser.id ? currentUser : null);
+              const isOwnReply = r.uid === currentUser.id;
               return (
                 <div key={i} className="comment">
-                  {ru
-                    ? <Av user={ru} size="av-sm" onClick={() => onNav("profile", ru.id)} />
-                    : <div className="av av-sm" style={{background:"var(--muted)"}} />
-                  }
-                  <div className="comment-body">
-                    <div className="comment-author" onClick={() => ru && onNav("profile", ru.id)}>
-                      {ru?.name || "..."} <span style={{color:"var(--muted)",fontWeight:400}}>· {ago({toMillis: () => r.ts})}</span>
+                  {ru ? <Av user={ru} size="av-sm" onClick={() => onNav("profile", ru.id)} /> : <div className="av av-sm" style={{background:"var(--muted)"}} />}
+                  <div className="comment-body" style={{flex:1}}>
+                    <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between"}}>
+                      <div className="comment-author" onClick={() => ru && onNav("profile", ru.id)}>
+                        {ru?.name || "..."} <span style={{color:"var(--muted)",fontWeight:400}}>· {ago({toMillis:()=>r.ts})}</span>
+                      </div>
+                      {isOwnReply && !r._optimistic && (
+                        <button onClick={() => deleteReply(r)} style={{background:"none",border:"none",cursor:"pointer",color:"var(--muted)",fontSize:"0.72rem",padding:"0 0 0 0.5rem",lineHeight:1,transition:"color 0.15s"}}
+                          onMouseOver={e=>e.target.style.color="var(--red)"} onMouseOut={e=>e.target.style.color="var(--muted)"}>
+                          ✕
+                        </button>
+                      )}
                     </div>
-                    <div className="comment-text">{r.text}</div>
+                    <div className="comment-text" style={{opacity: r._optimistic ? 0.6 : 1}}>{r.text}</div>
                   </div>
                 </div>
               );
@@ -811,13 +834,8 @@ function CommentItem({ comment, author, replies, commentAuthors, currentUser, po
         {/* Reply input */}
         {showReplyInput && (
           <div className="reply-input-wrap">
-            <input
-              ref={replyRef}
-              value={replyText}
-              onChange={e => setReplyText(e.target.value)}
-              placeholder={`reply to ${author.name}...`}
-              onKeyDown={e => e.key === "Enter" && submitReply()}
-            />
+            <input ref={replyRef} value={replyText} onChange={e => setReplyText(e.target.value)}
+              placeholder={`reply to ${author.name}...`} onKeyDown={e => e.key === "Enter" && submitReply()} />
             <button className="btn btn-primary" style={{padding:"0.35rem 0.65rem",flexShrink:0}} onClick={submitReply} disabled={!replyText.trim()}>
               <Icon.Send />
             </button>
@@ -857,7 +875,15 @@ function PostCard({ post: initialPost, currentUser, onNav, toast, onHashtagClick
     const q = query(commentsCol(post.id), orderBy("ts", "asc"));
     return onSnapshot(q, async snap => {
       const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      setComments(list);
+      // Replace all non-optimistic comments with fresh Firestore data
+      setComments(prev => {
+        const optimistic = prev.filter(c => c._optimistic);
+        // Remove optimistic ones that now exist in Firestore
+        const stillPending = optimistic.filter(o =>
+          !list.some(c => c.uid === o.uid && c.text === o.text)
+        );
+        return [...list, ...stillPending];
+      });
       const missing = [...new Set(list.map(c => c.uid))].filter(uid => !commentAuthors[uid]);
       if (missing.length) {
         const results = await Promise.all(missing.map(uid => getUser(uid)));
@@ -927,16 +953,35 @@ function PostCard({ post: initialPost, currentUser, onNav, toast, onHashtagClick
 
   const handleComment = async () => {
     if (!commentText.trim()) return;
-    await addDoc(commentsCol(post.id), { uid: currentUser.id, text: commentText.trim(), ts: serverTimestamp() });
-    await updateDoc(doc(db, "posts", post.id), { commentCount: increment(1) });
-    // notify post owner
-    const ownerUid = post.repostOf ? post.originalUid : post.uid;
-    await createNotif(ownerUid, currentUser, "comment", {
-      postId: post.id,
-      postPreview: post.text?.slice(0, 60),
-      commentText: commentText.trim().slice(0, 60)
-    });
+    const text = commentText.trim();
+
+    // Optimistic — show instantly before Firestore responds
+    const tempComment = {
+      id: `temp-${Date.now()}`,
+      uid: currentUser.id,
+      text,
+      ts: { toMillis: () => Date.now() },
+      _optimistic: true,
+    };
+    setComments(prev => [...prev, tempComment]);
+    setCAuthors(prev => ({ ...prev, [currentUser.id]: currentUser }));
     setCommentText("");
+
+    // Save to Firestore in background
+    try {
+      await addDoc(commentsCol(post.id), { uid: currentUser.id, text, ts: serverTimestamp() });
+      await updateDoc(doc(db, "posts", post.id), { commentCount: increment(1) });
+      const ownerUid = post.repostOf ? post.originalUid : post.uid;
+      await createNotif(ownerUid, currentUser, "comment", {
+        postId: post.id,
+        postPreview: post.text?.slice(0, 60),
+        commentText: text.slice(0, 60)
+      });
+    } catch (e) {
+      // If save fails, remove the optimistic comment
+      setComments(prev => prev.filter(c => c.id !== tempComment.id));
+      setCommentText(text);
+    }
   };
 
   // who to show as the "header" author

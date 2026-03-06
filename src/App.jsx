@@ -1334,9 +1334,16 @@ function FeedView({ currentUser, onNav, toast }) {
     }, err => { console.error("Feed error:", err); setLoading(false); });
   }, []);
 
-  // For You: ALL posts sorted by likes desc
-  const forYouPosts = [...allPosts]
-    .sort((a, b) => (b.likes?.length || 0) - (a.likes?.length || 0));
+  // For You: hot posts (16+ likes) first, then rest by newest
+  const forYouPosts = (() => {
+    const hot    = [...allPosts]
+      .filter(p => (p.likes?.length || 0) >= 16)
+      .sort((a, b) => (b.likes?.length || 0) - (a.likes?.length || 0));
+    const recent = [...allPosts]
+      .filter(p => (p.likes?.length || 0) < 16)
+      .sort((a, b) => (b.ts?.toMillis?.() || 0) - (a.ts?.toMillis?.() || 0));
+    return [...hot, ...recent];
+  })();
 
   // Following: only posts from followed users + self, sorted newest first
   const followingIds = new Set([currentUser.id, ...(currentUser.following || [])]);
@@ -1379,7 +1386,7 @@ function FeedView({ currentUser, onNav, toast }) {
           </div>
         : posts.map((p, i) => (
             <div key={p.id} style={{position:"relative"}}>
-              {feedTab === "foryou" && (p.likes?.length || 0) >= 3 && (
+              {feedTab === "foryou" && (p.likes?.length || 0) >= 16 && (
                 <div style={{position:"absolute",top:"0.85rem",right:"1rem",zIndex:10}}>
                   <span className="hot-badge">🔥 hot</span>
                 </div>

@@ -1334,20 +1334,31 @@ function FeedView({ currentUser, onNav, toast }) {
     }, err => { console.error("Feed error:", err); setLoading(false); });
   }, []);
 
-  // For You: hot posts (16+ likes) first, then rest by newest
+  const followingIds = new Set([currentUser.id, ...(currentUser.following || [])]);
+
+  // For You: exclude reposts (unless YOU reposted), hot posts first then newest
   const forYouPosts = (() => {
-    const hot    = [...allPosts]
+    const visible = allPosts.filter(p =>
+      !p.repostOf || p.uid === currentUser.id // hide reposts from others in For You
+    );
+    const hot    = visible
       .filter(p => (p.likes?.length || 0) >= 16)
       .sort((a, b) => (b.likes?.length || 0) - (a.likes?.length || 0));
-    const recent = [...allPosts]
+    const recent = visible
       .filter(p => (p.likes?.length || 0) < 16)
       .sort((a, b) => (b.ts?.toMillis?.() || 0) - (a.ts?.toMillis?.() || 0));
     return [...hot, ...recent];
   })();
 
-  // Following: only posts from followed users + self, sorted newest first
-  const followingIds = new Set([currentUser.id, ...(currentUser.following || [])]);
-  const followingPosts = allPosts.filter(p => followingIds.has(p.uid));
+  // Following: original posts from followed users + self
+  // + reposts from followed users (since you follow them, you see what they repost)
+  const followingPosts = allPosts
+    .filter(p => {
+      if (!followingIds.has(p.uid)) return false;       // must follow the poster
+      if (p.repostOf && !followingIds.has(p.uid)) return false; // extra guard
+      return true;
+    })
+    .sort((a, b) => (b.ts?.toMillis?.() || 0) - (a.ts?.toMillis?.() || 0));
 
   const posts = feedTab === "foryou" ? forYouPosts : followingPosts;
 

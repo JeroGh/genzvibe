@@ -849,36 +849,51 @@ function CommentItem({ comment, author, replies, commentAuthors, currentUser, po
 // ─── POST CARD ────────────────────────────────────────────────────────────────
 function PostCard({ post: initialPost, currentUser, onNav, toast, onHashtagClick }) {
   const [post, setPost]               = useState(initialPost);
-  const [author, setAuthor]           = useState(null);
-  const [repostAuthor, setRepostAuthor] = useState(null); // original author if repost
+  const [originalPost, setOriginalPost] = useState(null); // live original post when this is a repost
+  const [reposter, setReposter]       = useState(null);   // user who reposted
+  const [author, setAuthor]           = useState(null);   // original post author
   const [comments, setComments]       = useState([]);
   const [commentAuthors, setCAuthors] = useState({});
   const [showComments, setShowComments] = useState(false);
   const [commentText, setCommentText]   = useState("");
   const inputRef = useRef();
 
-  // ── Live listener on this post doc ──
+  // Live listener on repost ref doc
   useEffect(() => {
     return onSnapshot(doc(db, "posts", initialPost.id), snap => {
       if (snap.exists()) setPost({ id: snap.id, ...snap.data() });
     });
   }, [initialPost.id]);
 
-  // fetch the person who reposted (post.uid) and original author if repost
-  useEffect(() => { getUser(post.uid).then(setAuthor); }, [post.uid]);
+  // If repost — live listener on the ORIGINAL post doc
   useEffect(() => {
-    if (post.repostOf) getUser(post.originalUid).then(setRepostAuthor);
-  }, [post.repostOf, post.originalUid]);
+    if (!post.repostOf) return;
+    return onSnapshot(doc(db, "posts", post.repostOf), snap => {
+      if (snap.exists()) setOriginalPost({ id: snap.id, ...snap.data() });
+    });
+  }, [post.repostOf]);
 
+  // active = original post data if repost, else the post itself
+  const active = post.repostOf ? originalPost : post;
+
+  // Load reposter (who reposted) and original author separately
   useEffect(() => {
-    if (!showComments) return;
-    const q = query(commentsCol(post.id), orderBy("ts", "asc"));
+    if (post.repostOf) {
+      getUser(post.uid).then(setReposter);           // who reposted
+      getUser(post.originalUid).then(setAuthor);     // original author
+    } else {
+      getUser(post.uid).then(setAuthor);             // regular post author
+    }
+  }, [post.uid, post.repostOf, post.originalUid]);
+
+  // Comments always load from ORIGINAL post
+  useEffect(() => {
+    if (!showComments || !active?.id) return;
+    const q = query(commentsCol(active.id), orderBy("ts", "asc"));
     return onSnapshot(q, async snap => {
       const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      // Replace all non-optimistic comments with fresh Firestore data
       setComments(prev => {
         const optimistic = prev.filter(c => c._optimistic);
-        // Remove optimistic ones that now exist in Firestore
         const stillPending = optimistic.filter(o =>
           !list.some(c => c.uid === o.uid && c.text === o.text)
         );
@@ -894,53 +909,48 @@ function PostCard({ post: initialPost, currentUser, onNav, toast, onHashtagClick
         });
       }
     });
-  }, [showComments, post.id]);
+  }, [showComments, active?.id]);
 
-  if (!author) return null;
-  const liked    = currentUser && post.likes?.includes(currentUser.id);
-  const reposted = currentUser && post.repostedBy?.includes(currentUser.id);
-  const isOwn    = currentUser?.id === post.uid;
+  if (!author || !active) return null;
+
+  const liked    = active.likes?.includes(currentUser.id);
+  const reposted = active.repostedBy?.includes(currentUser.id);
+  const isOwn    = currentUser?.id === post.uid; // can delete own post or own repost ref
 
   const handleLike = async () => {
-    const ref2 = doc(db, "posts", post.id);
     if (liked) {
-      await updateDoc(ref2, { likes: arrayRemove(currentUser.id) });
+      await updateDoc(doc(db, "posts", active.id), { likes: arrayRemove(currentUser.id) });
     } else {
-      await updateDoc(ref2, { likes: arrayUnion(currentUser.id) });
-      // notify post owner
-      const ownerUid = post.repostOf ? post.originalUid : post.uid;
-      await createNotif(ownerUid, currentUser, "like", {
-        postId: post.id, postPreview: post.text?.slice(0, 60)
+      await updateDoc(doc(db, "posts", active.id), { likes: arrayUnion(currentUser.id) });
+      await createNotif(active.uid, currentUser, "like", {
+        postId: active.id, postPreview: active.text?.slice(0, 60)
       });
     }
   };
 
   const handleRepost = async () => {
     if (reposted) {
-      const q = query(postsCol(), where("repostOf", "==", post.id), where("uid", "==", currentUser.id));
+      const q = query(postsCol(), where("repostOf", "==", active.id), where("uid", "==", currentUser.id));
       const snap = await getDocs(q);
       snap.forEach(d => deleteDoc(d.ref));
-      await updateDoc(doc(db, "posts", post.id), {
+      await updateDoc(doc(db, "posts", active.id), {
         repostedBy: arrayRemove(currentUser.id),
-        repostCount: Math.max((post.repostCount || 1) - 1, 0)
+        repostCount: increment(-1)
       });
       toast("Repost removed");
     } else {
       await addDoc(postsCol(), {
         uid: currentUser.id,
-        repostOf: post.id,
-        originalUid: post.uid,
-        text: post.text,
-        likes: [], commentCount: 0, repostedBy: [], repostCount: 0,
+        repostOf: active.id,
+        originalUid: active.uid,
         ts: serverTimestamp()
       });
-      await updateDoc(doc(db, "posts", post.id), {
+      await updateDoc(doc(db, "posts", active.id), {
         repostedBy: arrayUnion(currentUser.id),
-        repostCount: (post.repostCount || 0) + 1
+        repostCount: increment(1)
       });
-      // notify post owner
-      await createNotif(post.uid, currentUser, "repost", {
-        postId: post.id, postPreview: post.text?.slice(0, 60)
+      await createNotif(active.uid, currentUser, "repost", {
+        postId: active.id, postPreview: active.text?.slice(0, 60)
       });
       toast("Reposted! 🔁");
     }
@@ -954,71 +964,54 @@ function PostCard({ post: initialPost, currentUser, onNav, toast, onHashtagClick
   const handleComment = async () => {
     if (!commentText.trim()) return;
     const text = commentText.trim();
-
-    // Optimistic — show instantly before Firestore responds
     const tempComment = {
-      id: `temp-${Date.now()}`,
-      uid: currentUser.id,
-      text,
-      ts: { toMillis: () => Date.now() },
-      _optimistic: true,
+      id: `temp-${Date.now()}`, uid: currentUser.id, text,
+      ts: { toMillis: () => Date.now() }, _optimistic: true,
     };
     setComments(prev => [...prev, tempComment]);
     setCAuthors(prev => ({ ...prev, [currentUser.id]: currentUser }));
     setCommentText("");
-
-    // Save to Firestore in background
     try {
-      await addDoc(commentsCol(post.id), { uid: currentUser.id, text, ts: serverTimestamp() });
-      await updateDoc(doc(db, "posts", post.id), { commentCount: increment(1) });
-      const ownerUid = post.repostOf ? post.originalUid : post.uid;
-      await createNotif(ownerUid, currentUser, "comment", {
-        postId: post.id,
-        postPreview: post.text?.slice(0, 60),
-        commentText: text.slice(0, 60)
+      await addDoc(commentsCol(active.id), { uid: currentUser.id, text, ts: serverTimestamp() });
+      await updateDoc(doc(db, "posts", active.id), { commentCount: increment(1) });
+      await createNotif(active.uid, currentUser, "comment", {
+        postId: active.id, postPreview: active.text?.slice(0, 60), commentText: text.slice(0, 60)
       });
     } catch (e) {
-      // If save fails, remove the optimistic comment
       setComments(prev => prev.filter(c => c.id !== tempComment.id));
       setCommentText(text);
     }
   };
 
-  // who to show as the "header" author
-  const displayAuthor = post.repostOf ? repostAuthor : author;
-  const reposterName  = post.repostOf ? author?.name : null;
-
   return (
     <div className="card post">
-      {/* Reposted-by label */}
-      {post.repostOf && reposterName && (
-        <div className="repost-label">
-          <Icon.Repost filled={false} /> {reposterName} reposted
+      {/* "X reposted" label */}
+      {post.repostOf && reposter && (
+        <div className="repost-label" style={{cursor:"pointer"}} onClick={() => onNav("profile", reposter.id)}>
+          <Icon.Repost filled={false} /> {reposter.name} reposted
         </div>
       )}
       <div className="post-head">
-        <Av user={displayAuthor || author} onClick={() => onNav("profile", (displayAuthor || author).id)} />
+        <Av user={author} onClick={() => onNav("profile", author.id)} />
         <div className="post-meta">
-          <div className="post-name" onClick={() => onNav("profile", (displayAuthor || author).id)}>
-            {displayAuthor ? displayAuthor.name : author.name}
-          </div>
-          <span className="post-handle">@{displayAuthor ? displayAuthor.handle : author.handle}</span>
-          <span className="post-time"> · {ago(post.ts)}</span>
+          <div className="post-name" onClick={() => onNav("profile", author.id)}>{author.name}</div>
+          <span className="post-handle">@{author.handle}</span>
+          <span className="post-time"> · {ago(active.ts)}</span>
         </div>
         {isOwn && <button className="btn-icon" onClick={handleDelete} style={{marginLeft:"auto"}}>✕</button>}
       </div>
       <div className="post-body">
-        <HighlightedText text={post.text} onHashtagClick={onHashtagClick || (() => {})} />
+        <HighlightedText text={active.text || ""} onHashtagClick={onHashtagClick || (() => {})} />
       </div>
       <div className="post-actions">
         <button className={`btn-icon ${liked ? "liked" : ""}`} onClick={handleLike}>
-          <Icon.Heart filled={liked} /> {post.likes?.length > 0 && post.likes.length}
+          <Icon.Heart filled={liked} /> {active.likes?.length > 0 && active.likes.length}
         </button>
         <button className={`btn-icon ${showComments ? "commented" : ""}`} onClick={() => { setShowComments(s => !s); setTimeout(() => inputRef.current?.focus(), 100); }}>
-          <Icon.Comment /> {post.commentCount > 0 && post.commentCount}
+          <Icon.Comment /> {active.commentCount > 0 && active.commentCount}
         </button>
         <button className={`btn-icon ${reposted ? "reposted" : ""}`} onClick={handleRepost}>
-          <Icon.Repost filled={reposted} /> {post.repostCount > 0 && post.repostCount}
+          <Icon.Repost filled={reposted} /> {active.repostCount > 0 && active.repostCount}
         </button>
       </div>
 
@@ -1035,7 +1028,7 @@ function PostCard({ post: initialPost, currentUser, onNav, toast, onHashtagClick
                 replies={replies}
                 commentAuthors={commentAuthors}
                 currentUser={currentUser}
-                postId={post.id}
+                postId={active.id}
                 onNav={onNav}
                 onReplyAuthorsNeeded={(uids) => {
                   const missing = uids.filter(uid => !commentAuthors[uid]);

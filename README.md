@@ -148,14 +148,14 @@ This is an MVP, and I'd rather be upfront about it than oversell it.
 
 ## 🗺️ Roadmap
 
-🎭 Anonymous mode (confession booth)
-🔥 Roast or Toast
-⚡ Hot Takes that expire in 24 hours unless they earn enough likes
-💬 Direct messages
-📊 Post analytics
-🌐 Custom domain
-☁️ Cloud Functions for notifications and counters
-📄 Feed pagination
+-- 🎭 Anonymous mode (confession booth)
+-- 🔥 Roast or Toast
+-- ⚡ Hot Takes that expire in 24 hours unless they earn enough likes
+-- 💬 Direct messages
+-- 📊 Post analytics
+-- 🌐 Custom domain
+-- ☁️ Cloud Functions for notifications and counters
+-- 📄 Feed pagination
 
 ---
 

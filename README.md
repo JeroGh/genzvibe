@@ -134,16 +134,6 @@ service cloud.firestore {
 
 ---
 
- ## Notes on security and scale
-
-This is an MVP, and I'd rather be upfront about it than oversell it.
-
-- Passwords are handled entirely by Firebase Auth, never stored by the app.
-- Some Firestore rules are intentionally permissive (any signed-in user can update posts and user docs) because likes, follows and counters write across users. Tightening these properly means moving those writes to **Cloud Functions**.
-- Notifications are created from the client today. A server-side function would stop anyone from forging them.
-- The feed loads the latest 200 posts at once, so **pagination** is the next scaling step.
-- Base64 images are fine for avatars at small scale. At larger scale they should move to proper object storage.
-
 ---
 
 ## 🗺️ Roadmap

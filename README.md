@@ -101,7 +101,6 @@ service cloud.firestore {
       allow create, delete: if request.auth.uid == uid;
       allow update: if request.auth != null;
     }
-
     match /posts/{postId} {
       allow read, create, update: if request.auth != null;
       allow delete: if request.auth.uid == resource.data.uid;
@@ -121,6 +120,7 @@ service cloud.firestore {
       allow create: if request.auth != null;
       allow read, update, delete: if request.auth.uid == uid;
     }
+
   }
 }
 ```

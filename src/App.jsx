@@ -1804,7 +1804,10 @@ function MessagesView({ currentUser, selectedUid, onNav, toast }) {
       await addDoc(messagesCol(conversationId), { senderId: currentUser.id, text: message, ts: serverTimestamp() });
     } catch (error) {
       setText(message);
-      toast("Couldn't send that message");
+      const detail = error?.code === "permission-denied"
+        ? "Permission denied. Both users must follow each other."
+        : error?.message || "Couldn't send that message";
+      toast(detail);
       console.error(error);
     }
   };

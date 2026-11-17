@@ -264,6 +264,18 @@ const CSS = () => (
     .comment-input input:focus { border-color: var(--accent); }
     .comment-input input::placeholder { color: var(--muted); }
 
+    /* MESSAGES */
+    .message-list { display: flex; flex-direction: column; gap: 0.6rem; }
+    .message-row { display: flex; gap: 0.75rem; align-items: center; padding: 0.75rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--card); cursor: pointer; text-align: left; color: var(--text); width: 100%; }
+    .message-row:hover, .message-row.active { border-color: var(--accent); background: rgba(124,58,237,0.08); }
+    .message-thread { display: flex; flex-direction: column; gap: 0.55rem; min-height: 360px; max-height: 58vh; overflow-y: auto; padding: 0.25rem; }
+    .message-bubble { max-width: 78%; padding: 0.6rem 0.8rem; border-radius: 14px; background: var(--surface); color: var(--text); font-size: 0.84rem; line-height: 1.45; align-self: flex-start; white-space: pre-wrap; word-break: break-word; }
+    .message-bubble.mine { align-self: flex-end; background: var(--accent); color: white; }
+    .message-time { font-size: 0.65rem; color: var(--muted); margin-top: 0.2rem; }
+    .message-compose { display: flex; gap: 0.6rem; margin-top: 0.8rem; }
+    .message-compose input { flex: 1; background: var(--surface); border: 1px solid var(--border); border-radius: 100px; padding: 0.65rem 0.9rem; color: var(--text); outline: none; font-family: var(--font-body); }
+    .message-compose input:focus { border-color: var(--accent); }
+
     /* REPLIES */
     .reply-btn { background: none; border: none; cursor: pointer; font-size: 0.72rem;
       color: var(--muted); font-family: var(--font-body); padding: 0.2rem 0;
@@ -525,6 +537,7 @@ const Icon = {
   Back:    () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>,
   Plus:    () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>,
   Bell:    () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>,
+  Message: () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-9 8.5 8.5 8.5 0 0 1-4-1l-5 1 1-4a8.5 8.5 0 1 1 17-4.5z"/><path d="M8 12h.01M12 12h.01M16 12h.01"/></svg>,
 };
 
 // ─── AVATAR ───────────────────────────────────────────────────────────────────
@@ -1061,6 +1074,21 @@ function PostCard({ post: initialPost, currentUser, onNav, toast, onHashtagClick
 
 // ─── NOTIFICATIONS ────────────────────────────────────────────────────────────
 const notifsCol = (uid) => collection(db, "users", uid, "notifications");
+const conversationsCol = () => collection(db, "conversations");
+const messagesCol = (conversationId) => collection(db, "conversations", conversationId, "messages");
+
+function conversationIdFor(uidA, uidB) {
+  return [uidA, uidB].sort().join("_");
+}
+
+function canMessage(currentUser, otherUser) {
+  return Boolean(
+    otherUser &&
+    currentUser.id !== otherUser.id &&
+    currentUser.following?.includes(otherUser.id) &&
+    otherUser.following?.includes(currentUser.id)
+  );
+}
 
 async function createNotif(toUid, fromUser, type, extra = {}) {
   if (toUid === fromUser.id) return; // don't notify yourself
@@ -1609,6 +1637,7 @@ function ProfileView({ uid, currentUser, onNav, toast, onRefresh }) {
 
   const isMe = currentUser?.id === uid;
   const following = currentUser?.following?.includes(uid);
+  const mutual = canMessage(currentUser, user);
 
   const toggle = async () => {
     const meRef   = doc(db, "users", currentUser.id);
@@ -1641,7 +1670,10 @@ function ProfileView({ uid, currentUser, onNav, toast, onRefresh }) {
           </div>
           {isMe
             ? <button className="btn btn-ghost" style={{fontSize:"0.8rem",padding:"0.4rem 1rem"}} onClick={() => setEditing(true)}>edit profile</button>
-            : <button className={`btn ${following ? "btn-following" : "btn-follow"}`} onClick={toggle}>{following ? "following" : "+ follow"}</button>
+            : <div style={{display:"flex",gap:"0.5rem"}}>
+                {mutual && <button className="btn btn-ghost" onClick={() => onNav("messages", uid)}><Icon.Message /> message</button>}
+                <button className={`btn ${following ? "btn-following" : "btn-follow"}`} onClick={toggle}>{following ? "following" : "+ follow"}</button>
+              </div>
           }
         </div>
         <div className="profile-name">{user.name}</div>
@@ -1703,6 +1735,110 @@ function ProfileView({ uid, currentUser, onNav, toast, onRefresh }) {
             </div>
           ));
       })()}
+    </div>
+  );
+}
+
+// ─── MESSAGES VIEW ───────────────────────────────────────────────────────────
+function MessagesView({ currentUser, selectedUid, onNav, toast }) {
+  const [conversations, setConversations] = useState([]);
+  const [people, setPeople] = useState({});
+  const [selectedUser, setSelectedUser] = useState(null);
+  const [messages, setMessages] = useState([]);
+  const [text, setText] = useState("");
+
+  useEffect(() => {
+    const q = query(conversationsCol(), where("participants", "array-contains", currentUser.id));
+    return onSnapshot(q, async snap => {
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => (b.updatedAt?.toMillis?.() || 0) - (a.updatedAt?.toMillis?.() || 0));
+      setConversations(list);
+      const users = await Promise.all(list.map(c => getUser(c.participants.find(id => id !== currentUser.id))));
+      setPeople(prev => {
+        const next = { ...prev };
+        users.forEach(user => { if (user) next[user.id] = user; });
+        return next;
+      });
+    });
+  }, [currentUser.id]);
+
+  useEffect(() => {
+    if (!selectedUid) {
+      setSelectedUser(null);
+      setMessages([]);
+      return undefined;
+    }
+    let active = true;
+    let unsubscribe = () => {};
+    getUser(selectedUid).then(user => {
+      if (!active) return;
+      setSelectedUser(user);
+      if (!user || !canMessage(currentUser, user)) {
+        setMessages([]);
+        return;
+      }
+      const q = query(messagesCol(conversationIdFor(currentUser.id, selectedUid)), orderBy("ts", "asc"), limit(100));
+      unsubscribe = onSnapshot(q, snap => {
+        if (active) setMessages(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      });
+    });
+    return () => { active = false; unsubscribe(); };
+  }, [currentUser.id, selectedUid]);
+
+  const send = async () => {
+    const message = text.trim();
+    if (!message || !selectedUser) return;
+    if (!canMessage(currentUser, selectedUser)) {
+      toast("You both need to follow each other to message");
+      return;
+    }
+    const conversationId = conversationIdFor(currentUser.id, selectedUser.id);
+    setText("");
+    try {
+      await setDoc(doc(db, "conversations", conversationId), {
+        participants: [currentUser.id, selectedUser.id],
+        lastMessage: message,
+        lastSenderId: currentUser.id,
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+      await addDoc(messagesCol(conversationId), { senderId: currentUser.id, text: message, ts: serverTimestamp() });
+    } catch (error) {
+      setText(message);
+      toast("Couldn't send that message");
+      console.error(error);
+    }
+  };
+
+  if (!selectedUid) {
+    return (
+      <div>
+        <div style={{fontFamily:"var(--font-head)",fontSize:"1.1rem",fontWeight:800,marginBottom:"1rem"}}>💬 Messages</div>
+        {conversations.length === 0
+          ? <div className="empty"><div className="empty-icon">💬</div><div className="empty-title">no messages yet</div><p>open a profile to start a mutual-follow DM</p></div>
+          : <div className="message-list">{conversations.map(c => {
+              const other = people[c.participants.find(id => id !== currentUser.id)];
+              return other ? (
+                <button key={c.id} className="message-row" onClick={() => onNav("messages", other.id)}>
+                  <Av user={other} /><div style={{minWidth:0,flex:1}}><div className="user-name">{other.name}</div><div className="notif-preview">{c.lastMessage}</div></div><div className="post-time">{ago(c.updatedAt)}</div>
+                </button>
+              ) : null;
+            })}</div>}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <button className="back" onClick={() => onNav("messages")}><Icon.Back /> all messages</button>
+      {selectedUser && <div className="card">
+        <button className="message-row" style={{border:"none",padding:0,background:"none"}} onClick={() => onNav("profile", selectedUser.id)}>
+          <Av user={selectedUser} /><div><div className="user-name">{selectedUser.name}</div><div className="user-handle">@{selectedUser.handle}</div></div>
+        </button>
+        {!canMessage(currentUser, selectedUser)
+          ? <div className="empty" style={{padding:"2rem 0"}}><div className="empty-icon">🔒</div><div className="empty-title">mutual follows only</div><p>follow each other to unlock DMs</p></div>
+          : <><div className="message-thread">{messages.map(m => <div key={m.id} className={`message-bubble ${m.senderId === currentUser.id ? "mine" : ""}`}>{m.text}<div className="message-time">{ago(m.ts)}</div></div>)}</div>
+              <div className="message-compose"><input value={text} onChange={e => setText(e.target.value)} maxLength={1000} placeholder={`message ${selectedUser.name}...`} onKeyDown={e => e.key === "Enter" && send()} /><button className="btn btn-primary" onClick={send} disabled={!text.trim()}><Icon.Send /></button></div></>}
+      </div>}
     </div>
   );
 }
@@ -1811,7 +1947,9 @@ export default function App() {
   }, [authUser]);
 
   const nav = useCallback((v, id = null) => {
-    setView(v); if (id) setProfileId(id);
+    setView(v);
+    if (v === "messages") setProfileId(id);
+    else if (id) setProfileId(id);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, []);
 
@@ -1826,6 +1964,7 @@ export default function App() {
   const NAV_ITEMS = [
     { id: "feed",          label: "home",    Icon: Icon.Home },
     { id: "explore",       label: "explore", Icon: Icon.Explore },
+    { id: "messages",      label: "messages", Icon: Icon.Message },
     { id: "notifications", label: "notifs",  Icon: Icon.Bell },
     { id: "profile",       label: "me",      Icon: Icon.Profile, action: () => nav("profile", currentUser.id) },
   ];
@@ -1876,6 +2015,7 @@ export default function App() {
         <main className="main">
           {view === "feed" && <FeedView currentUser={currentUser} onNav={nav} toast={toast} />}
           {view === "explore" && <ExploreView currentUser={currentUser} onNav={nav} toast={toast} onRefresh={() => loadCurrentUser(authUser.uid)} />}
+          {view === "messages" && <MessagesView currentUser={currentUser} selectedUid={profileId} onNav={nav} toast={toast} />}
           {view === "notifications" && <NotificationsView currentUser={currentUser} onNav={nav} />}
           {view === "profile" && profileId && <ProfileView uid={profileId} currentUser={currentUser} onNav={nav} toast={toast} onRefresh={() => loadCurrentUser(authUser.uid)} />}
         </main>

@@ -1247,7 +1247,7 @@ function VibeCheckStrip({ currentUser, toast, onOpenCreate }) {
       setPolls(snap.docs.map(d => ({ id: d.id, ...d.data() })));
       setLoading(false);
     });
-  }, []);
+  }, [toast]);
 
   if (loading) return null;
 
@@ -1921,9 +1921,15 @@ export default function App() {
   const toast = useCallback(msg => { setToastMsg(msg); setTimeout(() => setToastMsg(""), 2500); }, []);
 
   const loadCurrentUser = useCallback(async (uid) => {
-    const u = await getUser(uid);
-    setCurrentUser(u);
-  }, []);
+    try {
+      const u = await getUser(uid);
+      setCurrentUser(u);
+    } catch (error) {
+      console.error("Unable to load current user", error);
+      setCurrentUser(null);
+      toast("Unable to load profile. Check Firestore rules.");
+    }
+  }, [toast]);
 
   // Listen to Firebase auth state
   useEffect(() => {
